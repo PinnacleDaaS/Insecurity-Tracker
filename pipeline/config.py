@@ -11,7 +11,7 @@ RAW_TABLE = "raw_incidents"
 CLEAN_TABLE = "clean_incidents"
 
 STORAGE_BUCKET = "acled_raw_csv"
-CSV_FILENAME = "ACLED Data_2026-05-13.csv"
+CSV_FILENAME = "ACLED Data_2026-05-29.csv"
 
 def get_supabase() -> Client | None:
     if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
@@ -70,6 +70,14 @@ NUMBER_MAP = {
 KIDNAP_KEYWORDS = [
     "abduct", "kidnap", "hostage", "captor",
     "held captive", "seized", "whisked", "rustled",
+    "ransom", "spirited away", "carted away",
+    "forcibly taken",
+]
+
+# For non-civilian-targeting events (protests, battles, looting, etc.)
+# Only "abducted" is reliable — other keywords produce false positives
+KIDNAP_KEYWORDS_NON_CIVILIAN = [
+    "abducted",
 ]
 
 COMBATANT_TERMS = [
@@ -85,4 +93,9 @@ SECURITY_TERMS = [
 CIVILIAN_TERMS = [
     "worshippers", "farmers", "villagers", "women",
     "children", "residents", "commuters", "herders",
+    "students", "pupils", "teachers", "patients",
+    "devotees", "mourners", "workers", "labourers",
+    "laborers", "officials", "staff", "passengers",
+    "motorists", "travellers", "travelers", "pilgrims",
+    "corpers", "nysc",
 ]

@@ -1,26 +1,71 @@
 import re
-from config import NUMBER_MAP, KIDNAP_KEYWORDS, COMBATANT_TERMS, SECURITY_TERMS, CIVILIAN_TERMS
+from config import NUMBER_MAP, KIDNAP_KEYWORDS, KIDNAP_KEYWORDS_NON_CIVILIAN, COMBATANT_TERMS, SECURITY_TERMS, CIVILIAN_TERMS
 
-def extract_kidnappings(note: str) -> tuple[bool, int]:
+
+def _is_cattle_rustling(note_lower: str) -> bool:
+    """Check if 'rustled' refers to livestock, not people."""
+    return bool(re.search(r"rustled\s+\d+\s*(?:cows?|cattle|goats?|sheep|livestock|animals?)", note_lower))
+
+
+def _is_protest_about_kidnap(note_lower: str) -> bool:
+    """Check if the event is a protest/demo ABOUT a kidnapping, not a kidnap event itself."""
+    return bool(re.search(
+        r"(?:protest|demonstrat|rally|march)\s+.*\b(?:abduct|kidnap|abduction|kidnapping)",
+        note_lower
+    )) or bool(re.search(
+        r"\b(?:abduct|kidnap|abduction|kidnapping)\s+.*\b(?:protest|demonstrat|rally|march)",
+        note_lower
+    ))
+
+
+def _expand_word_numbers(text: str) -> str:
+    """Replace word-based numbers (several, dozens, etc.) with digits for pattern matching."""
+    result = text.lower()
+    for word, num in sorted(NUMBER_MAP.items(), key=lambda x: -len(x[0])):
+        result = re.sub(rf'\b{re.escape(word)}\b', str(num), result)
+    return result
+
+
+def extract_kidnappings(note: str, civilian_targeting: bool = True) -> tuple[bool, int]:
     if not note or not isinstance(note, str):
         return False, 0
 
     note_lower = note.lower()
 
-    skip_patterns = [
+    # Skip weapons/ammunition seizures (false positive for "seized")
+    if re.search(r"seized\s+\d+\s*(?:live\s+)?(?:rounds?|ammunition|weapons?|guns?|rifles?|rockets?|grenades?|explosives?|bombs?)", note_lower):
+        return False, 0
+
+    # Skip cattle rustling (false positive for "rustled")
+    if _is_cattle_rustling(note_lower):
+        return False, 0
+
+    # Always-skip patterns: court cases, historical references, former hostages
+    hard_skip_patterns = [
         r"\b(?:court|trial|sentenced|convict|appeal|verdict)\b",
         r"\b(?:in ?the ?past|last\s+(?:month|year|week|decade)|historical|formerly)\b",
-        r"\b(?:rescued|freed|released|escaped|surrendered|arrested|detained)\b",
-        r"\b(?:military|troops|soldiers|police|security)\s+(?:rescued|freed|stormed)\b",
         r"\b(?:former|ex-)\s+(?:hostage|captive)\b",
     ]
-    for pattern in skip_patterns:
+    for pattern in hard_skip_patterns:
         if re.search(pattern, note_lower):
             return False, 0
 
-    has_kidnap = any(kw in note_lower for kw in KIDNAP_KEYWORDS)
+    # For non-civilian-targeting events, use stricter keyword set
+    if not civilian_targeting:
+        keywords = KIDNAP_KEYWORDS_NON_CIVILIAN
+        # Skip protests about kidnappings (not new kidnap events)
+        if _is_protest_about_kidnap(note_lower):
+            return False, 0
+    else:
+        keywords = KIDNAP_KEYWORDS
+
+    has_kidnap = any(kw in note_lower for kw in keywords)
     if not has_kidnap:
         return False, 0
+
+    if re.search(r"\b(?:military|troops|soldiers|police|security)\s+(?:rescue|rescued|freed|stormed|recovered?)\b", note_lower):
+        if not re.search(r"\b(?:abducted|kidnapped|seized|whisked|captured)\s+\d+", note_lower):
+            return False, 0
 
     note_clean = re.sub(r"\b(?:19|20)\d{2}\b", "", note_lower)
     note_clean = re.sub(
@@ -32,10 +77,45 @@ def extract_kidnappings(note: str) -> tuple[bool, int]:
         "", note_clean
     )
 
+    note_clean = _expand_word_numbers(note_clean)
+
+    note_clean = re.sub(r",?\s*including\s+[^.]*?(?=\.|$)", "", note_clean)
+
+    note_clean = re.sub(
+        r"\b(?:killed|killing)\s+\d+(?:\s+(?:and|,))?",
+        "killed", note_clean
+    )
+    note_clean = re.sub(
+        r"\b(\d+)\s+(?:\w+\s+)?(?:person|people)\s+(?:was|were|have been|had been)\s+killed",
+        "killed", note_clean
+    )
+
+    summary_patterns = [
+        r"(\d+)\s+(?:persons?|people|individuals?|victims?)\s+(?:were|have been|had been)\s+(?:abducted|kidnapped)",
+        r"(?:abducted|kidnapped)\s+(?:a\s+)?total\s+of\s+(\d+)\s+(?:persons?|people|individuals?|victims?)",
+        r"total\s+of\s+(\d+)\s+(?:persons?|people|individuals?|victims?)\s+(?:were|have been|had been)\s+(?:abducted|kidnapped)",
+    ]
+    summary_matches = []
+    for pattern in summary_patterns:
+        for m in re.finditer(pattern, note_clean):
+            summary_matches.append(int(m.group(1)))
+    if summary_matches:
+        return True, max(summary_matches)
+
+    VICTIM_TYPES = (
+        r"girls?|boys?|women|men|children|persons?|people|"
+        r"villagers|residents|commuters|passengers|students|pupils|"
+        r"teachers|worshippers|farmers|herders|victims?|hostages?|captives?|"
+        r"corps?\s*members?|corpers|nysc\s*members?|"
+        r"devotees|parishioners|congregants|mourners|"
+        r"patients|officials|staff|workers|labourers|laborers|employees|"
+        r"motorists|travellers|travelers|pilgrims|disciples"
+    )
+
     total = 0
     breakdown_patterns = [
-        r"(\d+)\s*(?:girls?|boys?|women|men|children|persons?|people|villagers|residents|commuters|passengers|students|pupils|teachers|worshippers|farmers|herders|victims?|hostages?|captives?)",
-        r"(?:girls?|boys?|women|men|children|persons?|people|villagers|residents|commuters|passengers|students|pupils|teachers|worshippers|farmers|herders|victims?|hostages?|captives?)\s*(?:and|,)\s*(\d+)\s*(?:girls?|boys?|women|men|children|persons?|people)",
+        rf"(\d+)\s*(?:{VICTIM_TYPES})",
+        rf"(?:{VICTIM_TYPES})\s*(?:and|,)\s*(\d+)\s*(?:{VICTIM_TYPES})",
     ]
     for pattern in breakdown_patterns:
         matches = re.findall(pattern, note_clean)
@@ -44,15 +124,12 @@ def extract_kidnappings(note: str) -> tuple[bool, int]:
             total += num
 
     if total > 0:
-        range_match = re.search(r"(?:about|approximately|around|over|more than|some)\s*(\d+)", note_clean)
-        if range_match:
-            return True, total
         return True, total
 
     official_patterns = [
-        r"(?:police|officials|authorities|military|army|commissioner|spokesman|\w+\s+police)\s+(?:said|confirmed|reported|stated|announced)\s+(?:\w+\s+){0,3}(?:abducted|kidnapped|captured|seized|rustled|whisked)\s+(\d+)",
-        r"(\d+)\s+(?:persons?|people|individuals?|victims?|hostages?|captives?|villagers?|residents?|commuters?|passengers?|students?)\s+(?:abducted|kidnapped|captured|seized|rustled|whisked)",
-        r"(?:abducted|kidnapped|captured|seized|rustled|whisked)\s+(?:about|approximately|around|over|more than|some\s+)?(\d+)",
+        r"(?:police|officials|authorities|military|army|commissioner|spokesman|\w+\s+police)\s+(?:said|confirmed|reported|stated|announced)\s+(?:\w+\s+){0,3}(?:abducted|kidnapped|captured|seized|rustled|whisked|spirited|carted)\s+(\d+)",
+        rf"(\d+)\s+(?:persons?|people|individuals?|victims?|hostages?|captives?|villagers?|residents?|commuters?|passengers?|students?|corps?\s*members?|corpers?|workers?|labourers?|employees?|patients?|officials?)\s+(?:abducted|kidnapped|captured|seized|rustled|whisked|spirited|carted)",
+        r"(?:abducted|kidnapped|captured|seized|rustled|whisked|spirited|carted)\s+(?:about|approximately|around|over|more than|some\s+)?(\d+)",
     ]
     for pattern in official_patterns:
         match = re.search(pattern, note_clean)
@@ -61,14 +138,14 @@ def extract_kidnappings(note: str) -> tuple[bool, int]:
             if count_str.isdigit():
                 return True, int(count_str)
 
-    word_pattern = r"\b(?:abducted|kidnapped|captured|seized|rustled|whisked)\s+(\w+)"
+    word_pattern = r"\b(?:abducted|kidnapped|captured|seized|rustled|whisked|spirited|carted)\s+(\w+)"
     match = re.search(word_pattern, note_clean)
     if match:
         word = match.group(1)
         if word in NUMBER_MAP:
             return True, NUMBER_MAP[word]
 
-    total_pattern = r"(?:abducted|kidnapped|captured|seized|rustled)\s+(?:a\s+)?total\s+of\s+(\d+)"
+    total_pattern = r"(?:abducted|kidnapped|captured|seized|rustled|spirited|carted)\s+(?:a\s+)?total\s+of\s+(\d+)"
     match = re.search(total_pattern, note_clean)
     if match:
         return True, int(match.group(1))
@@ -80,11 +157,41 @@ def extract_kidnappings(note: str) -> tuple[bool, int]:
     return True, 0
 
 
+def _filter_injured(text: str) -> str:
+    """Remove numbers that refer to injuries (not fatalities)."""
+    return re.sub(r"\b(\d+)\s+\w*\s*injured\b", "", text)
+
+
+def _dedup_numbers(text: str) -> str:
+    """Remove duplicate numbers from alternative-source sentences.
+    Keeps the first mention of each number+unit pair, drops later repeats."""
+    lines = re.split(r'(?<=[.!])\s+', text)
+    kept_lines = []
+    seen_pairs = set()
+    for line in lines:
+        low = line.lower()
+        if any(w in low for w in ['stated that', 'said that', 'reported that', 'according to',
+                                    'other sources', 'international outlets', 'other reports']):
+            continue
+        nums = re.findall(r'(\d+)\s+(\w+)', line)
+        key = tuple(nums)
+        if key and key not in seen_pairs:
+            seen_pairs.add(key)
+            kept_lines.append(line)
+        elif not key:
+            kept_lines.append(line)
+    return ' '.join(kept_lines)
+
+
 def partition_fatalities(note: str, total_fatalities: int) -> tuple[int, int, int]:
     if not note or not isinstance(note, str) or total_fatalities <= 0:
         return 0, 0, 0
 
     note_lower = note.lower()
+    note_lower = _filter_injured(note_lower)
+    note_lower = _dedup_numbers(note_lower)
+    note_lower = _expand_word_numbers(note_lower)
+
     combatants, security, civilians = 0, 0, 0
 
     combatant_pattern = (
@@ -113,14 +220,18 @@ def partition_fatalities(note: str, total_fatalities: int) -> tuple[int, int, in
 
     parsed_total = combatants + security + civilians
     if parsed_total == 0:
-        civilians = total_fatalities
         return 0, 0, total_fatalities
 
-    if parsed_total != total_fatalities:
+    if parsed_total > total_fatalities:
         scale = total_fatalities / parsed_total
         combatants = round(combatants * scale)
         security = round(security * scale)
-        civilians = total_fatalities - combatants - security
+        civilians = max(0, total_fatalities - combatants - security)
+        diff = total_fatalities - combatants - security - civilians
+        if diff > 0:
+            civilians += diff
+    elif parsed_total < total_fatalities:
+        civilians = max(0, total_fatalities - combatants - security)
 
     return combatants, security, civilians
 
@@ -201,6 +312,11 @@ def classify_actor(actor_str: str) -> str:
         "customs", "civil defence", "correctional",
     ]):
         return "State Forces"
+
+    if any(kw in actor_lower for kw in [
+        "lakurawa", "issp", "islamic state sahel",
+    ]):
+        return "Lakurawa/IS-Sahel"
 
     if any(kw in actor_lower for kw in [
         "boko haram", "bh", "iswap", "iswa", "jas",

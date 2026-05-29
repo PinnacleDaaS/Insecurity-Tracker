@@ -7,25 +7,40 @@ def fetch_raw_records(batch: str | None = None) -> pd.DataFrame:
     if not supabase:
         return pd.DataFrame()
 
-    query = supabase.table(RAW_TABLE).select("*")
+    all_data = []
+    page_size = 1000
+    offset = 0
 
-    if batch:
-        query = query.eq("upload_batch", batch)
+    while True:
+        query = supabase.table(RAW_TABLE).select("*").range(offset, offset + page_size - 1)
 
-    response = query.execute()
+        if batch:
+            query = query.eq("upload_batch", batch)
 
-    if not response.data:
+        response = query.execute()
+
+        if not response.data:
+            break
+
+        all_data.extend(response.data)
+        offset += page_size
+
+        if len(response.data) < page_size:
+            break
+
+    print(f"Fetched {len(all_data)} raw records" + (f" for batch '{batch}'" if batch else ""))
+
+    if not all_data:
         print(f"No raw records found" + (f" for batch '{batch}'" if batch else ""))
         return pd.DataFrame()
 
-    df = pd.DataFrame(response.data)
+    df = pd.DataFrame(all_data)
 
     if "id" in df.columns:
         df = df.drop(columns=["id"])
     if "uploaded_at" in df.columns:
         df = df.drop(columns=["uploaded_at"])
 
-    print(f"Fetched {len(df)} raw records" + (f" for batch '{batch}'" if batch else ""))
     return df
 
 

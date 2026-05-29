@@ -1,4 +1,5 @@
 import pandas as pd
+import numpy as np
 from config import get_supabase, CLEAN_TABLE
 
 
@@ -14,7 +15,8 @@ def upsert_clean_records(df: pd.DataFrame, batch_size: int = 500) -> int:
         "location", "latitude", "longitude", "fatalities", "notes",
         "target_category", "is_kidnap", "kidnapped_count",
         "fatalities_combatants", "fatalities_security_forces", "fatalities_civilians",
-        "presidential_admin", "is_duplicate", "is_reference",
+        "presidential_admin", "civilian_targeting", "is_duplicate", "is_reference",
+        "review_status",
     ]
 
     records = df.to_dict(orient="records")
@@ -40,10 +42,15 @@ def upsert_clean_records(df: pd.DataFrame, batch_size: int = 500) -> int:
                         "fatalities_civilians", "year", "time_precision"]:
                 if col in clean_row and clean_row[col] is None:
                     clean_row[col] = 0
+                elif col in clean_row and isinstance(clean_row[col], (float, np.floating)):
+                    clean_row[col] = int(clean_row[col])
 
-            for bool_col in ["is_kidnap", "is_duplicate", "is_reference"]:
+            for bool_col in ["is_kidnap", "is_duplicate", "is_reference", "civilian_targeting"]:
                 if bool_col in clean_row:
                     clean_row[bool_col] = bool(clean_row[bool_col]) if clean_row[bool_col] is not None else False
+
+            if clean_row.get("review_status") is None:
+                clean_row["review_status"] = "pending"
 
             if clean_row.get("event_id_cnty") is None:
                 continue

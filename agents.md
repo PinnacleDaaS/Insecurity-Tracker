@@ -1,3 +1,22 @@
+---
+name: ui-ux-architect
+description: Fixes UI bugs, resolves layout overlaps, builds components, and implements modern design systems. Use when the user asks to "fix a UI bug", "adjust layout", "make it responsive", "improve the design", or "fix interactive elements".
+---
+
+# Role & Persona
+You are a Staff-Level UI/UX Frontend Engineer. Your expertise lies in building robust, interactive data dashboards, scrollytelling experiences, and modular application suites. You specialize in clean, minimalist design aesthetics (especially dark mode and charcoal themes) and flawless technical execution across modern frontend frameworks and visualization libraries (React, Tailwind, D3.js).
+
+# System & Architectural Rules
+1. **Stacking Context Mastery:** Treat `z-index` and visual overlaps as structural architecture, not an afterthought. When integrating third-party libraries (like web maps or complex charts), aggressively manage their bounds using `overflow: hidden` on wrappers. Ensure UI elements like data dictionaries, sidebars, tooltips, and headers have explicit `position` values (relative/absolute/fixed) and logical z-indexes to maintain authority over canvas layers.
+2. **Event & State Integrity:** Interactive visual elements (data dots, markers, charts) must always map correctly to state. Ensure interactive layers have `pointer-events: auto` enabled. When writing `onClick` or `onHover` events, ensure they cleanly extract data properties to populate tooltips or side-panels without blocking adjacent UI interactions.
+3. **Design System Execution:** Maintain high-contrast, editorial-style minimalism. Avoid visual clutter. Emphasize visual hierarchy using spacing, typography, and controlled color palettes (e.g., deep charcoal backgrounds with high-visibility accent colors for data points).
+4. **Implementation Decoupling:** Keep styling and layout logic strictly separated from data-fetching and backend integration logic.
+
+# Task Execution Workflow
+1. **Diagnosis First:** Before writing code, briefly analyze the DOM structure and identify the root cause of the UI/UX issue (e.g., missing pointer events, unconstrained flexbox, global CSS collisions, or runaway z-indexes).
+2. **Strategic Isolation:** Provide targeted, surgical fixes rather than rewriting entire components from scratch.
+3. **Code Output:** Return clear, annotated code snippets with concise explanations of *why* the CSS or JavaScript change resolves the specific visual or interactive bug.
+
 # 🏗 Nigeria Insecurity Tracker — Data Engineering Pipeline
 
 **Supabase Project**: `pvguhssnvzldvnnhmoqk.supabase.co`
@@ -69,17 +88,19 @@ After Python pipeline processes raw data.
 - is_kidnap (BOOLEAN), kidnapped_count (INT)
 - fatalities_combatants (INT), fatalities_security_forces (INT), fatalities_civilians (INT)
 - presidential_admin (TEXT) — mapped from date
+- civilian_targeting (BOOLEAN DEFAULT FALSE) — from raw `civilian_targeting` column
 - is_duplicate (BOOLEAN DEFAULT FALSE)
 - is_reference (BOOLEAN DEFAULT FALSE)
 - updated_at (TIMESTAMPTZ DEFAULT NOW())
 
 ### Gold: Materialized Views
-1. mv_summary_stats — total incidents, fatalities, distributions
-2. mv_timeline_data — monthly/yearly aggregations
-3. mv_state_profiles — per-state with coordinate centroids
-4. mv_lga_profiles — top 100 LGAs
-5. mv_actor_profiles — actor group summaries + yearly trends
-6. mv_incident_explorer — top 500 lethal incidents for search
+1. mv_summary_stats — total incidents, fatalities, distributions (new: civilian_targeting stats)
+2. mv_timeline_data — monthly/yearly aggregations (new: civilian targeting breakdown)
+3. mv_state_profiles — per-state with coordinate centroids (new: civilian_targeting filters)
+4. mv_lga_profiles — top 100 LGAs (new: civilian_targeting filters)
+5. mv_actor_profiles — actor group summaries
+6. mv_actor_yearly_trends — actor group year-over-year trends
+7. mv_incident_explorer — top 500 lethal incidents (new: civilian_targeting column)
 
 ## Nigerian State Standardization (STATE_MAP)
 
@@ -137,15 +158,23 @@ After Python pipeline processes raw data.
 
 ## NLP Extraction Rules
 
-### extract_kidnappings(note)
+### extract_kidnappings(note, civilian_targeting=True)
+
+**Civilian-targeting events** (full keyword set):
 1. Check kidnap keywords: abduct, kidnap, hostage, captor, held captive, seized, whisked, rustled
-2. Skip reference events (historical references, court cases, past incidents)
-3. Skip rescue/release operations (no new kidnappings — military freed captives)
-4. Strip standalone years (4-digit numbers like 2020–2026)
-5. Strip attacker strength descriptions before parsing ("gunmen numbering about 50")
-6. Parse precise breakdowns: "53 girls and 48 boys" = 101 total
-7. Police/official counts override range estimates
-8. Use regex for common kidnapping description patterns
+2. Skip weapons/ammunition seizures (matches "live ammunition" variants)
+3. Skip cattle rustling (false positive for "rustled")
+4. Skip reference events (historical, court cases, past incidents)
+5. Skip rescue/release operations (military freed captives)
+6. Strip standalone years (4-digit numbers like 2020–2026)
+7. Strip attacker strength descriptions ("gunmen numbering about 50")
+8. Parse precise breakdowns: "53 girls and 48 boys" = 101 total
+9. Police/official counts override range estimates
+
+**Non-civilian-targeting events** (restricted — protests, battles, looting, explosions):
+- Keyword set restricted to: "abducted" only
+- Skip protests ABOUT kidnappings (protest context detected)
+- All other rules above still apply
 
 ### partition_fatalities(note, total_fatalities)
 - Combatant terms: bandits, terrorists, gunmen, BH, Boko Haram, ISWAP, insurgents, militants, attackers
@@ -169,6 +198,7 @@ After Python pipeline processes raw data.
 
 ### classify_actor(actor_str)
 - **State Forces**: police, military, army, soldiers, troops, JTF, CSS, CJTF, vigilante, NSCDC
+- **Lakurawa/IS-Sahel**: Lakurawa, ISSP, Islamic State Sahel
 - **Boko Haram/ISWAP**: Boko Haram, BH, ISWAP, ISWA, JAS, Jamā'a Ahl as-Sunnah
 - **Bandits & Armed Gangs**: bandits, kidnappers, gunmen, armed men, unknown gunmen, hoodlums
 - **Sectarian/Ethnic Militia**: Fulani, herder, militia, Mambilla, Tiv, Berom, Igbira, Yoruba, Hausa
@@ -203,14 +233,16 @@ pipeline/
 ### Data Cleaning Pipeline (in order)
 1. **storage_import.py**: Download CSV from Storage → parse → upsert to `raw_incidents`
 2. **extract.py**: Query `raw_incidents` filtered by `upload_batch`, convert types
-3. **clean.py**: Apply STATE_MAP → ZONE_MAP → lga title-case → classify_actor() → get_administration()
-4. **nlp_parsers.py**: extract_target_category() → extract_kidnappings() → partition_fatalities()
+3. **clean.py**: Apply STATE_MAP → ZONE_MAP → lga title-case → classify_actor() → get_administration() → normalize_civilian_targeting()
+4. **nlp_parsers.py**: Split-stream processing by civilian_targeting:
+   - **Civilian-targeting** (20,381 rows): Full kidnap extraction (7 keywords) + fatality partition
+   - **Non-civilian-targeting** (28,796 rows): Restricted kidnap ("abducted" only, skip protest context) + fatality partition
 5. **dedup.py**: Pass 1 (exact duplicates) → Pass 2 (Jaccard fuzzy > 60% on same-date notes). Flag as is_duplicate, zero out fatalities.
 6. **load.py**: Upsert into `clean_incidents` with `on_conflict="event_id_cnty"`
-7. **refresh_views.py**: `REFRESH MATERIALIZED VIEW CONCURRENTLY mv_*` for all 6 views
+7. **refresh_views.py**: `REFRESH MATERIALIZED VIEW CONCURRENTLY mv_*` for all 7 views
 
 ### Deduplication (two-pass)
-1. **Exact**: pandas duplicates on [event_date, latitude, longitude, actor1, event_type, notes]
+1. **Exact**: pandas duplicates on [event_date, latitude, longitude, actor1, event_type, notes, civilian_targeting]
 2. **Jaccard Fuzzy**: group by same date, tokenize notes into word sets, similarity = |intersection| / |union|, threshold > 60%, also check shared large numbers + first-40-char prefix overlap
 3. Flagged: set is_duplicate=True, zero out fatalities/kidnapped_count
 
@@ -271,27 +303,33 @@ $$);
 ## Dashboard (tracker-app/)
 
 ### Stack
-- React 19 + Vite 8 + Recharts 3
-- `@supabase/supabase-js` for data fetching (replaces static JSON imports)
+- React 19 + Vite 8 + Recharts 3 + **D3.js v7** (replaces MapLibre GL)
+- `@supabase/supabase-js` for data fetching
+- `rc-slider` for date range slider
 - lucide-react for icons
 - Inter + Outfit fonts
 
 ### Data Flow
-All data fetched via Supabase REST API:
 ```
-supabase.from('mv_summary_stats').select('*').single()
-supabase.from('mv_timeline_data').select('*').order('year_month', { ascending: true })
-supabase.from('mv_state_profiles').select('*')
-supabase.from('mv_lga_profiles').select('*').limit(100)
-supabase.from('mv_actor_profiles').select('*')
-supabase.from('mv_incident_explorer').select('*').limit(500)
+App.jsx fetches all data → client-side filter (useMemo) → passes filteredIncidents to:
+  ├─ SVGMap.jsx (D3 SVG map: state paths + 49K dots + tooltip)
+  └─ ChartsSection.jsx (Recharts: timeline + breakdowns)
 ```
 
-### Component Architecture
-- `src/supabase.js` — init Supabase client with anon key
-- `src/App.jsx` — replaced static JSON imports with async data fetching + loading states
-- Keep all existing UI: SVG scatter map, glassmorphism cards, Recharts, search, expandable drawers
-- 4 tabs: Command Center, Timeline Trends, Actor Networks, Incident Explorer
+### Components (6 total)
+
+| Component | Purpose |
+|-----------|---------|
+| `SVGMap.jsx` | D3.js SVG map with Nigeria GeoJSON states, 49K incident dots (D3 data join), d3.zoom pan/zoom, d3.quadtree hover, built-in tooltip + detail panel |
+| `ChartsSection.jsx` | 4 Recharts: monthly incidents/fatalities line, event type bar (horizontal), top states bar, civilian targeting trend line |
+| `DateRangeSlider.jsx` | rc-slider dual-handle date range filter |
+| `DataDictionary.jsx` | Collapsible side panel: event types legend, fatality scale, methodology |
+| `FilterBar.jsx` | 5 dropdowns: state, eventType, year, president, civilian targeting |
+| `KPIBanner.jsx` | 3 KPI cards: total incidents, fatalities, kidnapped |
+
+### Deleted
+- `IncidentMap.jsx` → replaced by SVGMap.jsx
+- `IncidentPopup.jsx` → replaced by SVGMap tooltip + detail panel
 
 ### Environment Variables (`.env` or Vite env)
 ```

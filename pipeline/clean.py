@@ -150,6 +150,16 @@ def convert_types(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def normalize_civilian_targeting(df: pd.DataFrame) -> pd.DataFrame:
+    if "civilian_targeting" in df.columns:
+        df["civilian_targeting"] = df["civilian_targeting"].apply(
+            lambda x: True if isinstance(x, str) and x.strip().lower() == "civilian targeting" else False
+        )
+    else:
+        df["civilian_targeting"] = False
+    return df
+
+
 def run_cleaning(df: pd.DataFrame) -> pd.DataFrame:
     df = convert_types(df)
     df = standardize_states(df)
@@ -160,6 +170,7 @@ def run_cleaning(df: pd.DataFrame) -> pd.DataFrame:
     df = parse_dates(df)
     df = clean_actors(df)
     df = assign_admin_periods(df)
+    df = normalize_civilian_targeting(df)
 
     if "event_id_cnty" not in df.columns:
         df["event_id_cnty"] = df.index.astype(str)

@@ -25,8 +25,8 @@ from load import upsert_clean_records
 from refresh_views import refresh_all_views
 
 
-def run_nlp(df: pd.DataFrame) -> pd.DataFrame:
-    print("Running NLP extraction...")
+def run_civilian_nlp(df: pd.DataFrame) -> pd.DataFrame:
+    """NLP for civilian-targeting events: full kidnap extraction + fatality partition."""
     for idx, row in df.iterrows():
         note = row.get("notes", "")
         total_fatalities = row.get("fatalities", 0)
@@ -35,7 +35,7 @@ def run_nlp(df: pd.DataFrame) -> pd.DataFrame:
             total_fatalities = 0
         total_fatalities = int(total_fatalities)
 
-        is_kidnap, count = extract_kidnappings(note)
+        is_kidnap, count = extract_kidnappings(note, civilian_targeting=True)
         df.at[idx, "is_kidnap"] = is_kidnap
         df.at[idx, "kidnapped_count"] = count
 
@@ -45,6 +45,53 @@ def run_nlp(df: pd.DataFrame) -> pd.DataFrame:
         df.at[idx, "fatalities_combatants"] = combatants
         df.at[idx, "fatalities_security_forces"] = security
         df.at[idx, "fatalities_civilians"] = civilians
+
+    return df
+
+
+def run_non_civilian_nlp(df: pd.DataFrame) -> pd.DataFrame:
+    """NLP for non-civilian-targeting events: strict kidnap (abducted-only) + standard partition."""
+    for idx, row in df.iterrows():
+        note = row.get("notes", "")
+        total_fatalities = row.get("fatalities", 0)
+
+        if not isinstance(total_fatalities, (int, float)):
+            total_fatalities = 0
+        total_fatalities = int(total_fatalities)
+
+        is_kidnap, count = extract_kidnappings(note, civilian_targeting=False)
+        df.at[idx, "is_kidnap"] = is_kidnap
+        df.at[idx, "kidnapped_count"] = count
+
+        df.at[idx, "target_category"] = extract_target_category(note)
+
+        combatants, security, civilians = partition_fatalities(note, total_fatalities)
+        df.at[idx, "fatalities_combatants"] = combatants
+        df.at[idx, "fatalities_security_forces"] = security
+        df.at[idx, "fatalities_civilians"] = civilians
+
+    return df
+
+
+def run_nlp(df: pd.DataFrame) -> pd.DataFrame:
+    print("Running NLP extraction...")
+
+    if "civilian_targeting" not in df.columns:
+        df["civilian_targeting"] = False
+
+    civilian_mask = df["civilian_targeting"] == True
+    civilian_df = df[civilian_mask].copy()
+    non_civilian_df = df[~civilian_mask].copy()
+
+    if not civilian_df.empty:
+        print(f"  Civilian-targeting records: {len(civilian_df)}")
+        civilian_df = run_civilian_nlp(civilian_df)
+
+    if not non_civilian_df.empty:
+        print(f"  Non-civilian-targeting records: {len(non_civilian_df)}")
+        non_civilian_df = run_non_civilian_nlp(non_civilian_df)
+
+    df = pd.concat([civilian_df, non_civilian_df], ignore_index=False)
 
     print(f"NLP extraction complete for {len(df)} records")
     return df
@@ -126,6 +173,20 @@ if __name__ == "__main__":
     parser.add_argument("--rebuild", action="store_true", help="Rebuild from all raw data")
     parser.add_argument("--refresh-only", action="store_true", help="Only refresh materialized views")
     parser.add_argument("--import-only", action="store_true", help="Step 0 only: import CSV from Storage to raw_incidents")
+    parser.add_argument("--clear", action="store_true", help="Clear all records from clean_incidents (start fresh)")
     args = parser.parse_args()
+
+    if args.clear:
+        from config import get_supabase, CLEAN_TABLE
+        supabase = get_supabase()
+        if supabase:
+            print("WARNING: This will delete ALL records from clean_incidents!")
+            confirm = input("Type 'yes' to confirm: ")
+            if confirm.strip().lower() == 'yes':
+                supabase.table(CLEAN_TABLE).delete().neq("event_id_cnty", "").execute()
+                print("clean_incidents cleared.")
+            else:
+                print("Cancelled.")
+        sys.exit(0)
 
     run_pipeline(batch=args.batch, rebuild=args.rebuild, refresh_only=args.refresh_only, import_only=args.import_only)

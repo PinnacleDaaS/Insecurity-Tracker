@@ -7,7 +7,7 @@ def run_exact_dedup(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return df
 
-    dup_cols = [c for c in ["event_date", "latitude", "longitude", "actor1", "event_type", "notes"]
+    dup_cols = [c for c in ["event_date", "latitude", "longitude", "actor1", "event_type", "notes", "civilian_targeting"]
                 if c in df.columns]
 
     if len(dup_cols) < 3:
