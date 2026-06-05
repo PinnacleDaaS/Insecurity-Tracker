@@ -10,5 +10,5 @@ dist/
 Thumbs.db
 agents
 dashboard_prompt
-.opencode
+.opencode/
 .vscode
