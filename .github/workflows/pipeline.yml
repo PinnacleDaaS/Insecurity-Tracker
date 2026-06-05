@@ -1,56 +1,22 @@
-name: Insecurity Data Pipeline
+name: Refresh Materialized Views
 
 on:
   schedule:
     - cron: '0 6 * * 1'
   workflow_dispatch:
-    inputs:
-      batch:
-        description: 'Upload batch identifier (e.g. 2026-W21)'
-        required: false
-      mode:
-        description: 'Pipeline mode'
-        type: choice
-        options:
-          - auto
-          - rebuild
-          - refresh-only
-          - import-only
-        default: auto
 
 env:
   SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
   SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
 
 jobs:
-  run-pipeline:
+  refresh-views:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-          cache: 'pip'
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r pipeline/requirements.txt
-
-      - name: Run pipeline
-        run: |
-          if [ "${{ inputs.mode }}" = "rebuild" ]; then
-            python pipeline/run.py --rebuild
-          elif [ "${{ inputs.mode }}" = "refresh-only" ]; then
-            python pipeline/run.py --refresh-only
-          elif [ "${{ inputs.mode }}" = "import-only" ]; then
-            python pipeline/run.py --import-only
-          elif [ -n "${{ inputs.batch }}" ]; then
-            python pipeline/run.py --batch "${{ inputs.batch }}"
-          else
-            python pipeline/run.py
-          fi
+      - run: pip install supabase python-dotenv
+      - run: python refresh_views.py
