@@ -8,5 +8,7 @@ dist/
 .vite/
 .DS_Store
 Thumbs.db
-agents.md
-dashboard_prompt.md
+agents
+dashboard_prompt
+.opencode
+.vscode
