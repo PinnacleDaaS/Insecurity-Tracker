@@ -15,6 +15,7 @@ export default function DashboardLayout({
   children,
   activeFilterCount = 0,
   lastUpdated = null,
+  dateBounds = null,
 }) {
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
   const [desktopSidebarOpen, setDesktopSidebarOpen] = useState(true)
@@ -93,7 +94,7 @@ export default function DashboardLayout({
         <footer className="col-span-2 flex items-center justify-center border-t border-border bg-muted h-8 text-[11px] text-muted-foreground">
           <span>Data updated: <time>{formatDate(lastUpdated)}</time></span>
           <span className="mx-3 opacity-30">|</span>
-          <span>Coverage: 1999 – 2026-05-08</span>
+          <span>Coverage: {dateBounds ? `${dateBounds.min?.split('-')[0]} – ${new Date(dateBounds.max + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}` : '—'}</span>
           <span className="mx-3 opacity-30">|</span>
           <span>Source: <a href="https://acleddata.com" target="_blank" rel="noreferrer" className="underline underline-offset-2 decoration-muted-foreground/40 hover:decoration-foreground">ACLED</a></span>
           <span className="mx-3 opacity-30">|</span>

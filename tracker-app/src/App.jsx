@@ -286,6 +286,7 @@ export default function App() {
     <DashboardLayout
       lastUpdated={lastUpdated}
       activeFilterCount={activeFilterCount}
+      dateBounds={dateBounds}
       header={
         <Header
           dateRange={filters.dateRange || [dateBounds.min, dateBounds.max]}
@@ -345,7 +346,7 @@ export default function App() {
         </>
       }
       activityPanel={<ActivityFeed incidents={filteredIncidents} onSelect={setSelectedIncident} filters={filters} />}
-      dictionaryPanel={<DataDictionary open={dictionaryOpen} onClose={() => setDictionaryOpen(false)} />}
+      dictionaryPanel={<DataDictionary open={dictionaryOpen} onClose={() => setDictionaryOpen(false)} dateBounds={dateBounds} />}
     >
       {activeTab === 'map' ? (
         <ConflictMap

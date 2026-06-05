@@ -36,7 +36,7 @@ const ADMINISTRATIONS = [
   { name: 'Tinubu', period: '2023 – Present' },
 ]
 
-export default function DataDictionary({ open, onClose }) {
+export default function DataDictionary({ open, onClose, dateBounds }) {
   return (
     <>
       {open && (
@@ -193,7 +193,7 @@ export default function DataDictionary({ open, onClose }) {
                 </div>
                 <div>
                   <span className="font-semibold text-foreground text-xs">Coverage</span>
-                  <p className="text-xs">Nigeria, January 1999 – May 2026</p>
+                  <p className="text-xs">Nigeria, {dateBounds ? `${new Date(dateBounds.min + 'T00:00:00').toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })} – ${new Date(dateBounds.max + 'T00:00:00').toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })}` : '—'}</p>
                 </div>
                 <div>
                   <span className="font-semibold text-foreground text-xs">Scope</span>
