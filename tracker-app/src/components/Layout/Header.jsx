@@ -1,4 +1,4 @@
-import { MapPin, Calendar, Sun, Moon, BookOpen } from 'lucide-react'
+import { Calendar, Sun, Moon, BookOpen } from 'lucide-react'
 
 export default function Header({
   dateRange,
@@ -23,9 +23,7 @@ export default function Header({
     <div className="flex w-full items-center justify-between gap-4">
       {/* Left section — brand */}
       <div className="flex items-center gap-3">
-        <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-cyan-500/10">
-          <MapPin size={18} className="text-cyan-500 dark:text-cyan-400" />
-        </div>
+        <img src="/Pinnacle Logo.png" alt="Pinnacle" className="h-9 w-9 object-contain rounded-lg" />
         <h1 className="font-display text-lg font-bold text-foreground tracking-tight">
           Nigeria Conflict Tracker
         </h1>
