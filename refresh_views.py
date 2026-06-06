@@ -19,6 +19,6 @@ supabase = create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_SERVIC
 
 for view in VIEWS:
     print(f"Refreshing {view}...")
-    supabase.rpc("exec_sql", {"query": f"REFRESH MATERIALIZED VIEW CONCURRENTLY {view};"}).execute()
+    supabase.rpc("exec_sql_refresh", {"view_name": view}).execute()
 
 print("All views refreshed.")

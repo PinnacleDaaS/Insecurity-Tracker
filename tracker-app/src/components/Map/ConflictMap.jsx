@@ -285,6 +285,10 @@ function MapLayers({ allIncidents, onPointClick, onHover, onHoverEnd, isDark, fi
       map.on('mouseenter', incLayerId, handleMouseEnter)
       map.on('mouseleave', incLayerId, handlePointLeave)
       map.on('mousemove', incLayerId, handlePointMove)
+
+      // Apply current filter after rebuild (survives theme toggle)
+      const filterExpr = buildFilterExpr(filters)
+      map.setFilter(incLayerId, filterExpr)
     }).catch(err => console.error('Layer setup failed:', err))
 
     return () => {
