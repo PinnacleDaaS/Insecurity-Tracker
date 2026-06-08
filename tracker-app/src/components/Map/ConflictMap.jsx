@@ -76,6 +76,10 @@ function buildFilterExpr(filters) {
     conds.push(['>=', ['get', 'event_date'], filters.dateRange[0]])
   if (filters.dateRange?.[1])
     conds.push(['<=', ['get', 'event_date'], filters.dateRange[1]])
+  if (filters.victimType && filters.victimType !== 'All') {
+    const col = filters.victimType === 'Civilians' ? 'fatalities_civilians' : filters.victimType === 'Security Forces' ? 'fatalities_security_forces' : 'fatalities_combatants'
+    conds.push(['>', ['get', col], 0])
+  }
   return conds.length ? ['all', ...conds] : null
 }
 
@@ -112,6 +116,9 @@ function MapLayers({ allIncidents, onPointClick, onHover, onHoverEnd, isDark, fi
       properties: {
         event_id_cnty: inc.event_id_cnty,
         fatalities: inc.fatalities || 0,
+        fatalities_civilians: inc.fatalities_civilians || 0,
+        fatalities_combatants: inc.fatalities_combatants || 0,
+        fatalities_security_forces: inc.fatalities_security_forces || 0,
         kidnapped_count: inc.kidnapped_count || 0,
         civilian_targeting: inc.civilian_targeting || false,
         state_clean: inc.state_clean,

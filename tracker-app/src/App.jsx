@@ -217,7 +217,7 @@ export default function App() {
   }, [dateBounds])
 
   const handleResetFilters = useCallback(() => {
-    setFilters({ state: 'All', eventType: 'All', year: 'All', administration: 'All', civilianTargeting: 'All', geopoliticalZone: 'All', dateRange: [dateBounds.min, dateBounds.max] })
+    setFilters({ state: 'All', eventType: 'All', year: 'All', administration: 'All', civilianTargeting: 'All', geopoliticalZone: 'All', victimType: 'All', dateRange: [dateBounds.min, dateBounds.max] })
     setSelectedIncident(null)
   }, [dateBounds])
 
