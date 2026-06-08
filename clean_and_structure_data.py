@@ -360,6 +360,7 @@ def main():
             
             # Calculations
             pres_admin = get_presidential_admin(event_date)
+            fat_civilians = float(fatalities) if civilian_targeting else 0.0
             
             structured_rows.append({
                 "event_id_cnty": event_id,
@@ -383,7 +384,7 @@ def main():
                 "civilian_targeting": civilian_targeting,
                 "fatalities_combatants": 0,
                 "fatalities_security_forces": 0,
-                "fatalities_civilians": 0,
+                "fatalities_civilians": fat_civilians,
                 "presidential_admin": pres_admin,
                 "is_reference": False,
                 # Placeholders updated by Gemini
@@ -451,22 +452,6 @@ def main():
             category_counts[res.target_category] = category_counts.get(res.target_category, 0) + 1
         else:
             print(f"Warning: No Gemini cleaning results returned for ID {e_id}")
-            
-    # 6a. Assign fatality buckets based on civilian_targeting and actor groups
-    for r in structured_rows:
-        f = r["fatalities"]
-        if r["civilian_targeting"]:
-            r["fatalities_civilians"] = f
-            r["fatalities_combatants"] = 0
-            r["fatalities_security_forces"] = 0
-        elif r["actor1_group"] == "State Forces" or r["actor2_group"] == "State Forces":
-            r["fatalities_security_forces"] = f
-            r["fatalities_combatants"] = 0
-            r["fatalities_civilians"] = 0
-        else:
-            r["fatalities_combatants"] = f
-            r["fatalities_security_forces"] = 0
-            r["fatalities_civilians"] = 0
             
     # 7. Save to CSV and XLSX
     # Determine base name for output files

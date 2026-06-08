@@ -19,11 +19,6 @@ function matchesFilters(d, f) {
   if (f.civilianTargeting === 'Civilian Targeting' && !d.civilian_targeting) return false
   if (f.civilianTargeting === 'Non-Civilian Targeting' && d.civilian_targeting) return false
   if (f.geopoliticalZone !== 'All' && d.geopolitical_zone !== f.geopoliticalZone) return false
-  if (f.victimType && f.victimType !== 'All') {
-    if (f.victimType === 'Civilians' && !(d.fatalities_civilians > 0)) return false
-    if (f.victimType === 'Security Forces' && !(d.fatalities_security_forces > 0)) return false
-    if (f.victimType === 'Combatants' && !(d.fatalities_combatants > 0)) return false
-  }
   if (f.dateRange) {
     const ev = new Date(d.event_date)
     if (f.dateRange[0] && ev < new Date(f.dateRange[0])) return false
@@ -222,7 +217,7 @@ export default function App() {
   }, [dateBounds])
 
   const handleResetFilters = useCallback(() => {
-    setFilters({ state: 'All', eventType: 'All', year: 'All', administration: 'All', civilianTargeting: 'All', geopoliticalZone: 'All', victimType: 'All', dateRange: [dateBounds.min, dateBounds.max] })
+    setFilters({ state: 'All', eventType: 'All', year: 'All', administration: 'All', civilianTargeting: 'All', geopoliticalZone: 'All', dateRange: [dateBounds.min, dateBounds.max] })
     setSelectedIncident(null)
   }, [dateBounds])
 

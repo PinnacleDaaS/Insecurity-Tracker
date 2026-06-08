@@ -88,12 +88,10 @@ export function DetailPanel({ incident, onClose, mobile }) {
             <strong className="font-bold text-foreground">{formatNum(incident.fatalities)}</strong>
             <span className="text-muted-foreground">fatalities</span>
           </span>
-          {incident.kidnapped_count > 0 && (
-            <span className="flex items-center gap-1.5 text-sm">
-              <strong className="font-bold text-violet-500">{formatNum(incident.kidnapped_count)}</strong>
-              <span className="text-muted-foreground">kidnapped</span>
-            </span>
-          )}
+          <span className="flex items-center gap-1.5 text-sm">
+            <strong className="font-bold text-violet-500">{formatNum(incident.kidnapped_count)}</strong>
+            <span className="text-muted-foreground">kidnapped</span>
+          </span>
         </div>
 
         {incident.civilian_targeting && (
@@ -122,14 +120,6 @@ export function DetailPanel({ incident, onClose, mobile }) {
         {incident.notes && (
           <div className="rounded-lg bg-muted border border-border px-3 py-2">
             <p className="text-xs text-muted-foreground leading-relaxed">{incident.notes}</p>
-          </div>
-        )}
-
-        {(incident.fatalities_combatants > 0 || incident.fatalities_security_forces > 0 || incident.fatalities_civilians > 0) && (
-          <div className="flex flex-wrap gap-3 text-xs text-muted-foreground pt-1">
-            {incident.fatalities_combatants > 0 && <span>Combatants: {formatNum(incident.fatalities_combatants)}</span>}
-            {incident.fatalities_security_forces > 0 && <span>Security: {formatNum(incident.fatalities_security_forces)}</span>}
-            {incident.fatalities_civilians > 0 && <span>Civilians: {formatNum(incident.fatalities_civilians)}</span>}
           </div>
         )}
 
