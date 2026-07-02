@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { supabase } from './supabase.js'
 import DashboardLayout from './components/Layout/DashboardLayout.jsx'
 import Header from './components/Layout/Header.jsx'
@@ -37,17 +37,33 @@ const PRESIDENT_DATES = {
 
 const ADMIN_ORDER = ['OBJ', 'YAR', 'GEJ', 'PMB', 'BAT']
 
+function loadCache(key) {
+  try {
+    const raw = localStorage.getItem(`dashboard_${key}`)
+    return raw ? JSON.parse(raw) : null
+  } catch { return null }
+}
+
+function saveCache(key, val) {
+  try { localStorage.setItem(`dashboard_${key}`, JSON.stringify(val)) } catch {}
+}
+
+const CACHED_INCIDENTS = loadCache('incidents')
+const CACHED_DATE_BOUNDS = loadCache('dateBounds')
+
 export default function App() {
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(!CACHED_INCIDENTS)
   const [error, setError] = useState(null)
-  const [incidents, setIncidents] = useState([])
+  const [incidents, setIncidents] = useState(CACHED_INCIDENTS || [])
   const [theme, setTheme] = useState(() => localStorage.getItem('theme') || 'dark')
   const [activeTab, setActiveTab] = useState('map')
   const [filters, setFilters] = useState({ state: 'All', eventType: 'All', year: 'All', administration: 'All', civilianTargeting: 'All', geopoliticalZone: 'All', dateRange: null })
   const [selectedIncident, setSelectedIncident] = useState(null)
-  const [lastUpdated, setLastUpdated] = useState(null)
+  const [lastUpdated, setLastUpdated] = useState(loadCache('lastUpdated'))
   const [dictionaryOpen, setDictionaryOpen] = useState(false)
-  const [dateBounds, setDateBounds] = useState({ min: '1999-01-01', max: '2026-05-08' })
+  const [dateBounds, setDateBounds] = useState(CACHED_DATE_BOUNDS || { min: '1999-01-01', max: '2026-05-08' })
+  const [fetchAttempt, setFetchAttempt] = useState(0)
+  const retryCountRef = useRef(0)
 
   const filteredIncidents = useMemo(() => {
     return incidents.filter(d => matchesFilters(d, filters))
@@ -170,14 +186,21 @@ export default function App() {
           }
         }
 
+        retryCountRef.current = 0
         setIncidents(allData)
-        if (latestTs) setLastUpdated(latestTs)
+        saveCache('incidents', allData)
+        if (latestTs) {
+          setLastUpdated(latestTs)
+          saveCache('lastUpdated', latestTs)
+        }
 
         if (!initialSetupDone && allData.length) {
           initialSetupDone = true
           const dates = allData.map(d => d.event_date).filter(Boolean).sort()
           if (dates.length) {
-            setDateBounds({ min: dates[0], max: dates[dates.length - 1] })
+            const bounds = { min: dates[0], max: dates[dates.length - 1] }
+            setDateBounds(bounds)
+            saveCache('dateBounds', bounds)
             setFilters(prev => {
               if (!prev.dateRange) {
                 return { ...prev, dateRange: [dates[0], dates[dates.length - 1]] }
@@ -188,14 +211,28 @@ export default function App() {
         }
       } catch (err) {
         console.error('Error fetching dashboard data:', err)
-        setError(err.message)
+        const isTimeout = String(err.message).toLowerCase().includes('timeout') || String(err.message).toLowerCase().includes('canceling')
+        if (isTimeout && retryCountRef.current < 2) {
+          retryCountRef.current++
+          console.log(`Retrying fetch (attempt ${retryCountRef.current + 1}/3)...`)
+          await new Promise(r => setTimeout(r, 2000))
+          if (active) return fetchData()
+        }
+        if (!CACHED_INCIDENTS) {
+          setError(err.message)
+        }
+        setFetchAttempt(n => n + 1)
       }
     }
 
-    setLoading(true)
-    fetchData().finally(() => {
-      if (active) setLoading(false)
-    })
+    if (!CACHED_INCIDENTS) {
+      setLoading(true)
+      fetchData().finally(() => {
+        if (active) setLoading(false)
+      })
+    } else {
+      fetchData()
+    }
 
     const interval = setInterval(fetchData, 300000)
     return () => { active = false; clearInterval(interval) }
@@ -255,29 +292,45 @@ export default function App() {
     ? new Date(lastUpdated).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
     : null
 
-  if (loading || error) {
+  if (loading) {
     return (
       <div className="flex flex-col h-screen items-center justify-center bg-background text-foreground font-sans antialiased">
-        {error ? (
-          <div className="text-center max-w-md px-6">
-            <div className="mb-4 mx-auto h-12 w-12 rounded-full bg-red-500/10 flex items-center justify-center">
-              <span className="text-red-400 text-xl font-bold">!</span>
-            </div>
-            <p className="text-lg font-bold text-red-500 dark:text-red-400">Failed to load dashboard data</p>
-            <p className="mt-2 text-sm text-muted-foreground">{error}</p>
-            <button
-              onClick={() => window.location.reload()}
-              className="mt-5 rounded-lg border border-cyan-500/30 px-5 py-2.5 text-sm font-semibold text-cyan-600 dark:text-cyan-400 hover:bg-cyan-500/10 transition-colors"
-            >
-              Retry
-            </button>
+        {CACHED_INCIDENTS ? (
+          <div className="flex flex-col items-center gap-4">
+            <div className="h-8 w-8 animate-spin rounded-full border-2 border-border border-t-cyan-500 dark:border-t-cyan-400" />
+            <p className="text-sm text-muted-foreground">Refreshing cached data...</p>
+            <p className="text-xs text-muted-foreground/60">Showing last loaded data while fetching updates</p>
           </div>
         ) : (
           <div className="flex flex-col items-center gap-4">
             <div className="h-8 w-8 animate-spin rounded-full border-2 border-border border-t-cyan-500 dark:border-t-cyan-400" />
             <p className="text-sm text-muted-foreground">Loading Nigeria Conflict Data...</p>
+            {fetchAttempt > 0 && (
+              <p className="text-xs text-amber-500 dark:text-amber-400">Query timed out — retrying...</p>
+            )}
           </div>
         )}
+      </div>
+    )
+  }
+
+  if (error && !incidents.length) {
+    return (
+      <div className="flex flex-col h-screen items-center justify-center bg-background text-foreground font-sans antialiased">
+        <div className="text-center max-w-md px-6">
+          <div className="mb-4 mx-auto h-12 w-12 rounded-full bg-red-500/10 flex items-center justify-center">
+            <span className="text-red-400 text-xl font-bold">!</span>
+          </div>
+          <p className="text-lg font-bold text-red-500 dark:text-red-400">Failed to load dashboard data</p>
+          <p className="mt-2 text-sm text-muted-foreground">{error}</p>
+          <p className="mt-3 text-xs text-muted-foreground/60">This usually happens when the query takes too long. The data loads in ~30s on a fast connection.</p>
+          <button
+            onClick={() => window.location.reload()}
+            className="mt-5 rounded-lg border border-cyan-500/30 px-5 py-2.5 text-sm font-semibold text-cyan-600 dark:text-cyan-400 hover:bg-cyan-500/10 transition-colors"
+          >
+            Retry
+          </button>
+        </div>
       </div>
     )
   }
@@ -287,6 +340,7 @@ export default function App() {
       lastUpdated={lastUpdated}
       activeFilterCount={activeFilterCount}
       dateBounds={dateBounds}
+      stale={!!(error && incidents.length)}
       header={
         <Header
           dateRange={filters.dateRange || [dateBounds.min, dateBounds.max]}

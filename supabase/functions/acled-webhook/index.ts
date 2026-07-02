@@ -25,13 +25,25 @@ Deno.serve(async (req: Request) => {
       return new Response("missing github_pat", { status: 500 });
     }
 
-    const owner = Deno.env.get("GITHUB_OWNER");
-    const repo = Deno.env.get("GITHUB_REPO");
+    const { data: ownerData, error: ownerErr } = await supabase
+      .from("app_secrets")
+      .select("value")
+      .eq("name", "github_owner")
+      .single();
 
-    if (!owner || !repo) {
-      console.error("Missing GITHUB_OWNER or GITHUB_REPO env vars");
+    const { data: repoData, error: repoErr } = await supabase
+      .from("app_secrets")
+      .select("value")
+      .eq("name", "github_repo")
+      .single();
+
+    if (ownerErr || !ownerData || repoErr || !repoData) {
+      console.error("Missing github_owner or github_repo in app_secrets");
       return new Response("missing env config", { status: 500 });
     }
+
+    const owner = ownerData.value;
+    const repo = repoData.value;
 
     const res = await fetch(
       `https://api.github.com/repos/${owner}/${repo}/dispatches`,

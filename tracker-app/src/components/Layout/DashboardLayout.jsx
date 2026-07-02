@@ -16,6 +16,7 @@ export default function DashboardLayout({
   activeFilterCount = 0,
   lastUpdated = null,
   dateBounds = null,
+  stale = false,
 }) {
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
   const [desktopSidebarOpen, setDesktopSidebarOpen] = useState(true)
@@ -92,6 +93,12 @@ export default function DashboardLayout({
 
         {/* Footer — col-span-2, row-3 */}
         <footer className="col-span-2 flex items-center justify-center border-t border-border bg-muted h-8 text-[11px] text-muted-foreground">
+          {stale && (
+            <span className="flex items-center gap-1 text-amber-600 dark:text-amber-400 font-semibold mr-3">
+              <span className="inline-block h-1.5 w-1.5 rounded-full bg-amber-500 animate-pulse" />
+              Stale data — refresh
+            </span>
+          )}
           <span>Data updated: <time>{formatDate(lastUpdated)}</time></span>
           <span className="mx-3 opacity-30">|</span>
           <span>Coverage: {dateBounds ? `${dateBounds.min?.split('-')[0]} – ${new Date(dateBounds.max + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}` : '—'}</span>
