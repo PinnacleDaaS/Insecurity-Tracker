@@ -415,14 +415,22 @@ def main():
             refresh_materialized_views(supabase)
             return
 
-    # 5. Call Gemini for agentic cleaning
-    # Process in a single batch (122 is well within batch limits)
-    try:
-        gemini_results = call_gemini(gemini_client, "gemini-2.5-flash", structured_rows)
-        print(f"Successfully cleaned {len(gemini_results)} events with Gemini.")
-    except Exception as e:
-        print(f"Fatal Error calling Gemini API: {e}")
-        sys.exit(1)
+    # 5. Call Gemini for agentic cleaning (chunked to avoid timeouts)
+    GEMINI_CHUNK = 100
+    gemini_results = []
+    for i in range(0, len(structured_rows), GEMINI_CHUNK):
+        chunk = structured_rows[i:i+GEMINI_CHUNK]
+        try:
+            chunk_results = call_gemini(gemini_client, "gemini-2.5-flash", chunk)
+            gemini_results.extend(chunk_results)
+            print(f"  Gemini chunk {i//GEMINI_CHUNK + 1}/{(len(structured_rows)-1)//GEMINI_CHUNK + 1}: cleaned {len(chunk_results)} events")
+        except Exception as e:
+            print(f"  Gemini chunk {i//GEMINI_CHUNK + 1} failed: {e}")
+            if i == 0:
+                print(f"Fatal Error calling Gemini API on first chunk: {e}")
+                sys.exit(1)
+            print(f"  Skipping chunk — continuing with remaining rows")
+    print(f"Successfully cleaned {len(gemini_results)} events with Gemini.")
         
     # 6. Apply Gemini cleaned values to structured rows
     results_map = {res.id: res for res in gemini_results}
