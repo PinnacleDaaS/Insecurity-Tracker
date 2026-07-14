@@ -36,6 +36,7 @@ const PRESIDENT_DATES = {
 }
 
 const ADMIN_ORDER = ['OBJ', 'YAR', 'GEJ', 'PMB', 'BAT']
+const INCIDENT_COLUMNS = 'event_id_cnty,event_date,year,event_type,sub_event_type,state_clean,lga_clean,geopolitical_zone,actor1,actor2,location,latitude,longitude,fatalities,kidnapped_count,civilian_targeting,presidential_admin,notes,updated_at'
 
 function loadCache(key) {
   try {
@@ -163,7 +164,7 @@ export default function App() {
           promises.push(
             supabase
               .from('clean_incidents')
-              .select('*')
+              .select(INCIDENT_COLUMNS)
               .neq('is_duplicate', true)
               .order('event_date', { ascending: false })
               .range(from, to)
@@ -225,16 +226,35 @@ export default function App() {
       }
     }
 
+    async function checkForUpdates() {
+      const cached = loadCache('lastUpdated')
+      if (!cached) return
+      try {
+        const { data } = await supabase
+          .from('clean_incidents')
+          .select('updated_at')
+          .neq('is_duplicate', true)
+          .order('updated_at', { ascending: false })
+          .limit(1)
+        if (!active) return
+        const latest = data?.[0]?.updated_at
+        if (latest && latest !== cached) {
+          console.log('Data change detected, refreshing...')
+          await fetchData()
+        }
+      } catch (err) {
+        console.error('Update check failed:', err)
+      }
+    }
+
     if (!CACHED_INCIDENTS) {
       setLoading(true)
       fetchData().finally(() => {
         if (active) setLoading(false)
       })
-    } else {
-      fetchData()
     }
 
-    const interval = setInterval(fetchData, 300000)
+    const interval = setInterval(checkForUpdates, 300000)
     return () => { active = false; clearInterval(interval) }
   }, [])
 
