@@ -139,7 +139,7 @@ def export_dashboard_data(supabase_client):
     PAGE = 1000
     i = 0
     while True:
-        resp = supabase_client.table('clean_incidents').select(cols).neq('is_duplicate', True).order('event_date', ascending=False).range(i, i + PAGE - 1).execute()
+        resp = supabase_client.table('clean_incidents').select(cols).neq('is_duplicate', True).order('event_date', desc=True).range(i, i + PAGE - 1).execute()
         batch = resp.data or []
         if not batch:
             break
