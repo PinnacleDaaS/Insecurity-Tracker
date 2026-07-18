@@ -132,6 +132,27 @@ def refresh_materialized_views(supabase_client):
             print(f"  Warning: Could not refresh {view}: {e}")
     print("All views refreshed.")
 
+def export_dashboard_data(supabase_client):
+    """Export all clean incidents to a static JSON file for the dashboard (zero-Supabase serving)."""
+    cols = 'event_id_cnty,event_date,year,event_type,sub_event_type,state_clean,lga_clean,geopolitical_zone,actor1,actor2,location,latitude,longitude,fatalities,kidnapped_count,civilian_targeting,presidential_admin,updated_at'
+    all_rows = []
+    PAGE = 1000
+    i = 0
+    while True:
+        resp = supabase_client.table('clean_incidents').select(cols).neq('is_duplicate', True).order('event_date', ascending=False).range(i, i + PAGE - 1).execute()
+        batch = resp.data or []
+        if not batch:
+            break
+        all_rows.extend(batch)
+        if len(batch) < PAGE:
+            break
+        i += PAGE
+    out = Path(__file__).parent / 'tracker-app' / 'public' / 'data' / 'incidents.json'
+    out.parent.mkdir(parents=True, exist_ok=True)
+    with open(out, 'w', encoding='utf-8') as f:
+        json.dump(all_rows, f, ensure_ascii=False, separators=(',', ':'))
+    print(f"Dashboard data exported: {len(all_rows)} rows to {out}")
+
 
 def load_actor_mappings() -> dict:
     mapping_file = Path(__file__).parent / "actor_groups_mapping.json"
@@ -411,8 +432,9 @@ def main():
             print(f"Skipping {skipped} already-processed rows (saving Gemini costs).")
         if not structured_rows:
             print("All rows already exist in database. Nothing to process.")
-            # Still refresh views and exit cleanly
+            # Still refresh views and export dashboard data
             refresh_materialized_views(supabase)
+            export_dashboard_data(supabase)
             return
 
     # 5. Call Gemini for agentic cleaning (chunked to avoid timeouts)
@@ -530,6 +552,9 @@ def main():
         # Refresh materialised views
         print("Refreshing materialized views...")
         refresh_materialized_views(supabase)
+
+        # Export static dashboard data file
+        export_dashboard_data(supabase)
             
     print("All tasks completed successfully!")
 

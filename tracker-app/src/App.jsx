@@ -36,7 +36,7 @@ const PRESIDENT_DATES = {
 }
 
 const ADMIN_ORDER = ['OBJ', 'YAR', 'GEJ', 'PMB', 'BAT']
-const INCIDENT_COLUMNS = 'event_id_cnty,event_date,year,event_type,sub_event_type,state_clean,lga_clean,geopolitical_zone,actor1,actor2,location,latitude,longitude,fatalities,kidnapped_count,civilian_targeting,presidential_admin,notes,updated_at'
+const FALLBACK_COLUMNS = 'event_id_cnty,event_date,year,event_type,sub_event_type,state_clean,lga_clean,geopolitical_zone,actor1,actor2,location,latitude,longitude,fatalities,kidnapped_count,civilian_targeting,presidential_admin,notes,updated_at'
 
 function loadCache(key) {
   try {
@@ -145,45 +145,14 @@ export default function App() {
     async function fetchData() {
       setError(null)
       try {
-        const { count: cleanCount, error: countErr } = await supabase
-          .from('clean_incidents')
-          .select('*', { count: 'exact', head: true })
-          .neq('is_duplicate', true)
-        if (countErr) throw new Error(countErr.message)
-        if (!active) return
+        const resp = await fetch('/data/incidents.json')
+        if (!resp.ok) throw new Error(`Failed to load data (HTTP ${resp.status})`)
+        const allData = await resp.json()
 
-        const PAGE = 1000
-        const total = cleanCount || 49000
-        const pages = Math.ceil(total / PAGE)
         let latestTs = null
-
-        const promises = []
-        for (let i = 0; i < pages; i++) {
-          const from = i * PAGE
-          const to = Math.min(from + PAGE - 1, total - 1)
-          promises.push(
-            supabase
-              .from('clean_incidents')
-              .select(INCIDENT_COLUMNS)
-              .neq('is_duplicate', true)
-              .order('event_date', { ascending: false })
-              .range(from, to)
-          )
-        }
-
-        const results = await Promise.all(promises)
-        if (!active) return
-
-        const allData = []
-        for (const { data, error } of results) {
-          if (error) throw new Error(error.message)
-          if (data) {
-            allData.push(...data)
-            for (const row of data) {
-              if (row.updated_at && (!latestTs || row.updated_at > latestTs)) {
-                latestTs = row.updated_at
-              }
-            }
+        for (const row of allData) {
+          if (row.updated_at && (!latestTs || row.updated_at > latestTs)) {
+            latestTs = row.updated_at
           }
         }
 
@@ -211,13 +180,52 @@ export default function App() {
           }
         }
       } catch (err) {
-        console.error('Error fetching dashboard data:', err)
-        const isTimeout = String(err.message).toLowerCase().includes('timeout') || String(err.message).toLowerCase().includes('canceling')
-        if (isTimeout && retryCountRef.current < 2) {
-          retryCountRef.current++
-          console.log(`Retrying fetch (attempt ${retryCountRef.current + 1}/3)...`)
-          await new Promise(r => setTimeout(r, 2000))
-          if (active) return fetchData()
+        console.warn('Static data file unavailable, trying Supabase...', err.message)
+        try {
+          const { count, error: countErr } = await supabase
+            .from('clean_incidents')
+            .select('event_id_cnty', { count: 'exact', head: true })
+            .neq('is_duplicate', true)
+          if (countErr) throw new Error(countErr.message)
+          if (!active) return
+          const PAGE = 1000
+          const total = count || 49000
+          const pages = Math.ceil(total / PAGE)
+          const promises = []
+          for (let i = 0; i < pages; i++) {
+            promises.push(
+              supabase
+                .from('clean_incidents')
+                .select(FALLBACK_COLUMNS)
+                .neq('is_duplicate', true)
+                .order('event_date', { ascending: false })
+                .range(i * PAGE, Math.min((i + 1) * PAGE - 1, total - 1))
+            )
+          }
+          const results = await Promise.all(promises)
+          if (!active) return
+          const allData = []
+          let latestTs = null
+          for (const { data, error } of results) {
+            if (error) throw new Error(error.message)
+            if (data) {
+              allData.push(...data)
+              for (const row of data) {
+                if (row.updated_at && (!latestTs || row.updated_at > latestTs)) latestTs = row.updated_at
+              }
+            }
+          }
+          if (!allData.length) throw new Error('No data returned')
+          retryCountRef.current = 0
+          setIncidents(allData)
+          saveCache('incidents', allData)
+          if (latestTs) {
+            setLastUpdated(latestTs)
+            saveCache('lastUpdated', latestTs)
+          }
+          return
+        } catch (fallbackErr) {
+          console.error('Supabase fallback also failed:', fallbackErr)
         }
         if (!CACHED_INCIDENTS) {
           setError(err.message)
@@ -257,6 +265,22 @@ export default function App() {
     const interval = setInterval(checkForUpdates, 300000)
     return () => { active = false; clearInterval(interval) }
   }, [])
+
+  useEffect(() => {
+    const eid = selectedIncident?.event_id_cnty
+    if (!eid || selectedIncident.notes !== undefined) return
+    let cancelled = false
+    supabase
+      .from('clean_incidents')
+      .select('notes')
+      .eq('event_id_cnty', eid)
+      .single()
+      .then(({ data, error }) => {
+        if (cancelled || error || !data) return
+        setSelectedIncident(prev => prev?.event_id_cnty === eid ? { ...prev, notes: data.notes || '' } : prev)
+      })
+    return () => { cancelled = true }
+  }, [selectedIncident?.event_id_cnty])
 
   const handleFilterChange = useCallback((key, value) => {
     if (key === 'administration' && value !== 'All') {
@@ -343,7 +367,7 @@ export default function App() {
           </div>
           <p className="text-lg font-bold text-red-500 dark:text-red-400">Failed to load dashboard data</p>
           <p className="mt-2 text-sm text-muted-foreground">{error}</p>
-          <p className="mt-3 text-xs text-muted-foreground/60">This usually happens when the query takes too long. The data loads in ~30s on a fast connection.</p>
+          <p className="mt-3 text-xs text-muted-foreground/60">The dashboard data file could not be loaded. Try reloading the page.</p>
           <button
             onClick={() => window.location.reload()}
             className="mt-5 rounded-lg border border-cyan-500/30 px-5 py-2.5 text-sm font-semibold text-cyan-600 dark:text-cyan-400 hover:bg-cyan-500/10 transition-colors"
