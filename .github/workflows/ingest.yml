@@ -10,6 +10,9 @@ env:
   SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
   GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
 
+permissions:
+  contents: write
+
 jobs:
   ingest:
     runs-on: ubuntu-latest
@@ -21,9 +24,11 @@ jobs:
           python-version: '3.12'
       - run: pip install supabase python-dotenv google-genai pydantic openpyxl
       - run: python clean_and_structure_data.py --from-storage --upload
-      - run: |
+      - name: Commit and push data file
+        run: |
           git config user.name "Pipeline Bot"
           git config user.email "bot@insecuritytracker.com"
           git add tracker-app/public/data/incidents.json
-          git diff --cached --quiet || git commit -m "chore: update dashboard data file [skip ci]"
+          git diff --cached --quiet || git commit -m "chore: update dashboard data file"
+          git pull --rebase
           git push
