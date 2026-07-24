@@ -1,5 +1,5 @@
 """ACLED Data Structuring & Agentic Cleaning Script.
-Conforms data to the Supabase clean_incidents schema, performs agentic cleaning with Gemini, and exports/uploads results.
+Conforms data to the clean schema, performs agentic cleaning with Gemini, and exports/uploads results to Cloudflare R2.
 """
 
 import argparse
@@ -9,6 +9,7 @@ import os
 import sys
 import glob
 import tempfile
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -18,17 +19,9 @@ from google import genai
 from google.genai import types
 import openpyxl
 
+import boto3
+from botocore.config import Config
 
-# Materialised views to refresh after upload
-MATERIALIZED_VIEWS = [
-    "mv_summary_stats",
-    "mv_timeline_data",
-    "mv_state_profiles",
-    "mv_lga_profiles",
-    "mv_actor_profiles",
-    "mv_actor_yearly_trends",
-    "mv_incident_explorer",
-]
 
 # ─── Config & Constants ────────────────────────────────────────────
 STATE_TO_ZONE = {
@@ -82,76 +75,118 @@ def get_presidential_admin(date_str: str) -> str:
     else:
         return "Tinubu"
 
-def download_from_storage(supabase_client, bucket: str) -> str | None:
-    """Download the newest CSV file from Supabase Storage, return local path."""
+def download_from_r2() -> str | None:
+    """Download the newest CSV file from the R2 bucket, return local path."""
     try:
-        objects = supabase_client.storage.from_(bucket).list()
-        csv_objects = [o for o in objects if o.get("name", "").endswith(".csv")]
-        if not csv_objects:
-            print(f"Error: No CSV files found in Storage bucket '{bucket}'.")
+        acct = os.environ.get("R2_ACCOUNT_ID")
+        access_key = os.environ.get("R2_ACCESS_KEY")
+        secret_key = os.environ.get("R2_SECRET_KEY")
+        bucket = os.environ.get("R2_BUCKET", "insecurity-tracker")
+        if not all([acct, access_key, secret_key]):
+            print("Error: R2 credentials required for --from-r2.")
             return None
-        csv_objects.sort(key=lambda o: o.get("updated_at", o.get("created_at", "")), reverse=True)
-        newest = csv_objects[0]["name"]
-        print(f"Downloading newest CSV from Storage: {newest}")
-        data = supabase_client.storage.from_(bucket).download(newest)
+        endpoint = f"https://{acct}.r2.cloudflarestorage.com"
+        s3 = boto3.client('s3', endpoint_url=endpoint, aws_access_key_id=access_key, aws_secret_access_key=secret_key, config=Config(signature_version='s3v4'), region_name='auto')
+        objects = s3.list_objects_v2(Bucket=bucket)
+        csv_objects = [o for o in objects.get('Contents', []) if o['Key'].endswith('.csv') and 'cleaned' not in o['Key']]
+        if not csv_objects:
+            print(f"Error: No raw CSV files found in R2 bucket '{bucket}'.")
+            return None
+        csv_objects.sort(key=lambda o: o['LastModified'], reverse=True)
+        newest = csv_objects[0]['Key']
+        print(f"Downloading newest CSV from R2: {newest}")
+        resp = s3.get_object(Bucket=bucket, Key=newest)
+        data = resp['Body'].read()
         tmp = tempfile.NamedTemporaryFile(mode="wb", suffix=".csv", delete=False)
         tmp.write(data)
         tmp.close()
         print(f"Saved to temporary file: {tmp.name}")
         return tmp.name
     except Exception as e:
-        print(f"Error downloading from Storage: {e}")
+        print(f"Error downloading from R2: {e}")
         return None
 
 
-def fetch_existing_ids(supabase_client, table: str) -> set:
-    """Return set of all event_id_cnty values already in the table."""
-    existing = set()
-    PAGE = 1000
-    i = 0
-    while True:
-        resp = supabase_client.table(table).select("event_id_cnty").range(i, i + PAGE - 1).execute()
-        batch = resp.data or []
-        if not batch:
-            break
-        existing.update(r["event_id_cnty"] for r in batch)
-        if len(batch) < PAGE:
-            break
-        i += PAGE
-    print(f"Found {len(existing)} existing rows in {table}")
-    return existing
-
-
-def refresh_materialized_views(supabase_client):
-    """Refresh all materialized views concurrently."""
-    for view in MATERIALIZED_VIEWS:
-        try:
-            supabase_client.rpc("exec_sql_refresh", {"view_name": view}).execute()
-            print(f"  Refreshed {view}")
-        except Exception as e:
-            print(f"  Warning: Could not refresh {view}: {e}")
-    print("All views refreshed.")
-
-def export_dashboard_data(supabase_client):
-    """Export all clean incidents to a static JSON file for the dashboard (zero-Supabase serving)."""
-    cols = 'event_id_cnty,event_date,year,event_type,sub_event_type,state_clean,lga_clean,geopolitical_zone,actor1,actor2,location,latitude,longitude,fatalities,kidnapped_count,civilian_targeting,presidential_admin,updated_at'
-    all_rows = []
-    PAGE = 1000
-    i = 0
-    while True:
-        resp = supabase_client.table('clean_incidents').select(cols).neq('is_duplicate', True).order('event_date', desc=True).range(i, i + PAGE - 1).execute()
-        batch = resp.data or []
-        if not batch:
-            break
-        all_rows.extend(batch)
-        if len(batch) < PAGE:
-            break
-        i += PAGE
+def export_dashboard_json(rows: list[dict]):
+    """Export non-duplicate rows as incidents.json for the dashboard (from in-memory data, no DB)."""
+    cols = ['event_id_cnty', 'event_date', 'year', 'event_type', 'sub_event_type',
+            'state_clean', 'lga_clean', 'geopolitical_zone', 'actor1', 'actor2',
+            'location', 'latitude', 'longitude', 'fatalities', 'kidnapped_count',
+            'civilian_targeting', 'presidential_admin', 'updated_at']
+    filtered = [r for r in rows if not r.get('is_duplicate')]
+    exported = [{c: r[c] for c in cols} for r in filtered]
+    exported.sort(key=lambda r: r['event_date'], reverse=True)
     out = Path(__file__).parent / 'tracker-app' / 'public' / 'data' / 'incidents.json'
     out.parent.mkdir(parents=True, exist_ok=True)
     with open(out, 'w', encoding='utf-8') as f:
-        json.dump(all_rows, f, ensure_ascii=False, separators=(',', ':'))
-    print(f"Dashboard data exported: {len(all_rows)} rows to {out}")
+        json.dump(exported, f, ensure_ascii=False, separators=(',', ':'))
+    print(f"Dashboard data exported: {len(exported)} rows to {out}")
+
+
+def export_notes_json(rows: list[dict]):
+    """Export notes as a JSON map (event_id_cnty -> notes) from in-memory data."""
+    notes = {}
+    for r in rows:
+        if r.get('is_duplicate'):
+            continue
+        n = r.get('notes', '')
+        if n:
+            notes[r['event_id_cnty']] = n
+    out = Path(__file__).parent / 'tracker-app' / 'public' / 'data' / 'notes.json'
+    out.parent.mkdir(parents=True, exist_ok=True)
+    with open(out, 'w', encoding='utf-8') as f:
+        json.dump(notes, f, ensure_ascii=False, separators=(',', ':'))
+    print(f"Notes exported: {len(notes)} entries to {out}")
+
+
+def upload_to_r2():
+    """Upload incidents.json, notes.json, meta.json to Cloudflare R2."""
+    acct = os.environ.get("R2_ACCOUNT_ID")
+    access_key = os.environ.get("R2_ACCESS_KEY")
+    secret_key = os.environ.get("R2_SECRET_KEY")
+    bucket = os.environ.get("R2_BUCKET", "insecurity-tracker")
+
+    if not all([acct, access_key, secret_key]):
+        print("Missing R2 credentials (R2_ACCOUNT_ID, R2_ACCESS_KEY, R2_SECRET_KEY), skipping R2 upload.")
+        return
+
+    endpoint = f"https://{acct}.r2.cloudflarestorage.com"
+    s3 = boto3.client('s3', endpoint_url=endpoint, aws_access_key_id=access_key, aws_secret_access_key=secret_key, config=Config(signature_version='s3v4'), region_name='auto')
+
+    data_dir = Path(__file__).parent / 'tracker-app' / 'public' / 'data'
+    incidents_path = data_dir / 'incidents.json'
+    notes_path = data_dir / 'notes.json'
+
+    if incidents_path.exists():
+        s3.upload_file(str(incidents_path), bucket, 'incidents.json', ExtraArgs={'ContentType': 'application/json', 'CacheControl': 'max-age=3600'})
+        print(f"Uploaded incidents.json ({incidents_path.stat().st_size / 1e6:.1f} MB)")
+
+        meta = {
+            'updated_at': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
+            'row_count': None,
+            'file_size': incidents_path.stat().st_size,
+        }
+        with open(incidents_path) as f:
+            rows = json.load(f)
+            meta['row_count'] = len(rows)
+            meta['date_min'] = rows[-1]['event_date'] if rows else None
+            meta['date_max'] = rows[0]['event_date'] if rows else None
+        s3.put_object(Bucket=bucket, Key='meta.json', Body=json.dumps(meta).encode(), ContentType='application/json', CacheControl='no-cache')
+        print(f"Uploaded meta.json ({meta['row_count']} rows, {meta['date_min']} - {meta['date_max']})")
+
+    if notes_path.exists():
+        s3.upload_file(str(notes_path), bucket, 'notes.json', ExtraArgs={'ContentType': 'application/json', 'CacheControl': 'max-age=3600'})
+        print(f"Uploaded notes.json ({notes_path.stat().st_size / 1e6:.1f} MB)")
+
+    # Upload the cleaned CSV for traceability
+    csv_files = [f for f in Path(__file__).parent.glob("*_cleaned.csv")]
+    if csv_files:
+        latest_csv = max(csv_files, key=lambda p: p.stat().st_mtime)
+        r2_key = f"cleaned/{latest_csv.name}"
+        s3.upload_file(str(latest_csv), bucket, r2_key, ExtraArgs={'ContentType': 'text/csv'})
+        print(f"Uploaded {latest_csv.name} to R2 ({latest_csv.stat().st_size / 1e6:.1f} MB)")
+
+    print("R2 upload complete!")
 
 
 def load_actor_mappings() -> dict:
@@ -255,31 +290,19 @@ RULES FOR d / r (duplicates):
 def main():
 
     
-    parser = argparse.ArgumentParser(description="Clean and structure ACLED data to fit Supabase schema.")
+    parser = argparse.ArgumentParser(description="Clean and structure ACLED data and upload dashboard files to R2.")
     parser.add_argument("--csv", help="Path to input CSV file. Defaults to latest ACLED CSV in directory.")
-    parser.add_argument("--from-storage", action="store_true", help="Download newest CSV from Supabase Storage bucket.")
-    parser.add_argument("--bucket", default="acled_raw_csv", help="Supabase Storage bucket name (default: acled_raw_csv).")
-    parser.add_argument("--upload", action="store_true", help="Upsert results to Supabase clean_incidents table.")
+    parser.add_argument("--from-r2", action="store_true", help="Download newest raw CSV from R2 bucket.")
+    parser.add_argument("--upload-to-r2", action="store_true", help="Upload dashboard data files to Cloudflare R2")
     
     args = parser.parse_args()
     
     load_dotenv()
     
-    # Early Supabase client setup if needed for storage download or upload
-    supabase = None
-    if args.from_storage or args.upload:
-        url = os.environ.get("SUPABASE_URL")
-        key = os.environ.get("SUPABASE_SERVICE_KEY")
-        if not url or not key:
-            print("Error: SUPABASE_URL and SUPABASE_SERVICE_KEY required for --from-storage or --upload.")
-            sys.exit(1)
-        from supabase import create_client
-        supabase = create_client(url, key)
-    
     # 1. Resolve CSV path
     csv_path = args.csv
-    if args.from_storage:
-        csv_path = download_from_storage(supabase, args.bucket)
+    if args.from_r2:
+        csv_path = download_from_r2()
         if not csv_path:
             sys.exit(1)
     elif not csv_path:
@@ -338,7 +361,6 @@ def main():
             actor1_group = actor_mappings.get(actor1)
             if not actor1_group:
                 actor1_group = classify_actor_fallback(actor1)
-                # print(f"  [fallback] actor1: '{actor1}' -> '{actor1_group}'")
                 
             actor2_group = None
             if actor2:
@@ -408,7 +430,6 @@ def main():
                 "fatalities_civilians": fat_civilians,
                 "presidential_admin": pres_admin,
                 "is_reference": False,
-                # Placeholders updated by Gemini
                 "target_category": "General/Unspecified",
                 "is_kidnap": False,
                 "kidnapped_count": 0,
@@ -416,27 +437,11 @@ def main():
                 "duplicate_of": None,
                 "review_status": "pending",
                 "review_note": None,
-                # Current execution timestamp (updated_at)
                 "updated_at": datetime.now(timezone.utc).isoformat()
             })
             
     print(f"Structured {len(structured_rows)} rows. Running agentic cleaning via Gemini...")
     
-    # 4a. If uploading, skip rows already in the database
-    if args.upload:
-        existing_ids = fetch_existing_ids(supabase, "clean_incidents")
-        before = len(structured_rows)
-        structured_rows = [r for r in structured_rows if r["event_id_cnty"] not in existing_ids]
-        skipped = before - len(structured_rows)
-        if skipped:
-            print(f"Skipping {skipped} already-processed rows (saving Gemini costs).")
-        if not structured_rows:
-            print("All rows already exist in database. Nothing to process.")
-            # Still refresh views and export dashboard data
-            refresh_materialized_views(supabase)
-            export_dashboard_data(supabase)
-            return
-
     # 5. Call Gemini for agentic cleaning (chunked to avoid timeouts)
     GEMINI_CHUNK = 100
     gemini_results = []
@@ -484,30 +489,23 @@ def main():
             print(f"Warning: No Gemini cleaning results returned for ID {e_id}")
             
     # 7. Save to CSV and XLSX
-    # Determine base name for output files
     base_name = Path(csv_path).stem
     out_csv = f"{base_name}_cleaned.csv"
     out_xlsx = f"{base_name}_cleaned.xlsx"
     
     headers = list(structured_rows[0].keys())
     
-    # Write CSV
     print(f"Writing structured outputs to {out_csv}...")
     with open(out_csv, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=headers)
         writer.writeheader()
         writer.writerows(structured_rows)
         
-    # Write Excel
     print(f"Writing structured outputs to {out_xlsx}...")
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "clean_incidents_rows"
-    
-    # Headers
     ws.append(headers)
-    
-    # Rows
     for r in structured_rows:
         row_values = []
         for h in headers:
@@ -517,7 +515,6 @@ def main():
             else:
                 row_values.append(val)
         ws.append(row_values)
-        
     wb.save(out_xlsx)
     wb.close()
     
@@ -532,29 +529,13 @@ def main():
         print(f"    - {cat:<25}: {count}")
     print("="*50 + "\n")
     
-    # 8. Optional Supabase upload
-    if args.upload:
-        if not structured_rows:
-            print("No new rows to upload.")
-        else:
-            print(f"Uploading {len(structured_rows)} new rows to Supabase table 'clean_incidents'...")
-            try:
-                chunk_size = 500
-                for i in range(0, len(structured_rows), chunk_size):
-                    chunk = structured_rows[i:i+chunk_size]
-                    supabase.table("clean_incidents").upsert(chunk, on_conflict="event_id_cnty").execute()
-                    print(f"  Upserted rows {i+1} to {min(i+chunk_size, len(structured_rows))}")
-                print("Successfully uploaded all data to Supabase!")
-            except Exception as e:
-                print(f"Error during Supabase upload: {e}")
-                sys.exit(1)
-        
-        # Refresh materialised views
-        print("Refreshing materialized views...")
-        refresh_materialized_views(supabase)
+    # 8. Generate dashboard JSON files directly from in-memory data
+    export_dashboard_json(structured_rows)
+    export_notes_json(structured_rows)
 
-        # Export static dashboard data file
-        export_dashboard_data(supabase)
+    # 9. Upload to R2
+    if args.upload_to_r2:
+        upload_to_r2()
             
     print("All tasks completed successfully!")
 

@@ -11,7 +11,6 @@
   "dependencies": {
     "@base-ui/react": "^1.5.0",
     "@fontsource-variable/geist": "^5.2.9",
-    "@supabase/supabase-js": "^2.106.0",
     "@turf/bbox": "^7.3.5",
     "@turf/helpers": "^7.3.5",
     "class-variance-authority": "^0.7.1",

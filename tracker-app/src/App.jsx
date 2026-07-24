@@ -1,5 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
-import { supabase } from './supabase.js'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import DashboardLayout from './components/Layout/DashboardLayout.jsx'
 import Header from './components/Layout/Header.jsx'
 import Sidebar from './components/Layout/Sidebar.jsx'
@@ -10,6 +9,8 @@ import TrendChart from './components/Analytics/TrendChart.jsx'
 import DataDictionary from './components/Layout/DataDictionary.jsx'
 import SeasonalityHeatmap from './components/Charts/SeasonalityHeatmap.jsx'
 import ZoneFatalityBreakdown from './components/Charts/ZoneFatalityBreakdown.jsx'
+
+const R2_BASE = import.meta.env.VITE_R2_BASE || (import.meta.env.DEV ? '/data' : 'https://pub-6822fbb2a7bf4318838ad6be0300175a.r2.dev')
 
 function matchesFilters(d, f) {
   if (f.state !== 'All' && d.state_clean !== f.state) return false
@@ -36,7 +37,6 @@ const PRESIDENT_DATES = {
 }
 
 const ADMIN_ORDER = ['OBJ', 'YAR', 'GEJ', 'PMB', 'BAT']
-const FALLBACK_COLUMNS = 'event_id_cnty,event_date,year,event_type,sub_event_type,state_clean,lga_clean,geopolitical_zone,actor1,actor2,location,latitude,longitude,fatalities,kidnapped_count,civilian_targeting,presidential_admin,notes,updated_at'
 
 function loadCache(key) {
   try {
@@ -63,8 +63,6 @@ export default function App() {
   const [lastUpdated, setLastUpdated] = useState(loadCache('lastUpdated'))
   const [dictionaryOpen, setDictionaryOpen] = useState(false)
   const [dateBounds, setDateBounds] = useState(CACHED_DATE_BOUNDS || { min: '1999-01-01', max: '2026-05-08' })
-  const [fetchAttempt, setFetchAttempt] = useState(0)
-  const retryCountRef = useRef(0)
 
   const filteredIncidents = useMemo(() => {
     return incidents.filter(d => matchesFilters(d, filters))
@@ -140,13 +138,12 @@ export default function App() {
 
   useEffect(() => {
     let active = true
-    let initialSetupDone = false
 
     async function fetchData() {
       setError(null)
       try {
-        const resp = await fetch('/data/incidents.json')
-        if (!resp.ok) throw new Error(`Failed to load data (HTTP ${resp.status})`)
+        const resp = await fetch(R2_BASE + '/incidents.json')
+        if (!resp.ok) throw new Error('Failed to load data (HTTP ' + resp.status + ')')
         const allData = await resp.json()
 
         let latestTs = null
@@ -156,7 +153,6 @@ export default function App() {
           }
         }
 
-        retryCountRef.current = 0
         setIncidents(allData)
         saveCache('incidents', allData)
         if (latestTs) {
@@ -164,73 +160,23 @@ export default function App() {
           saveCache('lastUpdated', latestTs)
         }
 
-        if (!initialSetupDone && allData.length) {
-          initialSetupDone = true
-          const dates = allData.map(d => d.event_date).filter(Boolean).sort()
-          if (dates.length) {
-            const bounds = { min: dates[0], max: dates[dates.length - 1] }
-            setDateBounds(bounds)
-            saveCache('dateBounds', bounds)
-            setFilters(prev => {
-              if (!prev.dateRange) {
-                return { ...prev, dateRange: [dates[0], dates[dates.length - 1]] }
-              }
-              return prev
-            })
-          }
+        const dates = allData.map(d => d.event_date).filter(Boolean).sort()
+        if (dates.length) {
+          const bounds = { min: dates[0], max: dates[dates.length - 1] }
+          setDateBounds(bounds)
+          saveCache('dateBounds', bounds)
+          setFilters(prev => {
+            if (!prev.dateRange) {
+              return { ...prev, dateRange: [dates[0], dates[dates.length - 1]] }
+            }
+            return prev
+          })
         }
       } catch (err) {
-        console.warn('Static data file unavailable, trying Supabase...', err.message)
-        try {
-          const { count, error: countErr } = await supabase
-            .from('clean_incidents')
-            .select('event_id_cnty', { count: 'exact', head: true })
-            .neq('is_duplicate', true)
-          if (countErr) throw new Error(countErr.message)
-          if (!active) return
-          const PAGE = 1000
-          const total = count || 49000
-          const pages = Math.ceil(total / PAGE)
-          const promises = []
-          for (let i = 0; i < pages; i++) {
-            promises.push(
-              supabase
-                .from('clean_incidents')
-                .select(FALLBACK_COLUMNS)
-                .neq('is_duplicate', true)
-                .order('event_date', { ascending: false })
-                .range(i * PAGE, Math.min((i + 1) * PAGE - 1, total - 1))
-            )
-          }
-          const results = await Promise.all(promises)
-          if (!active) return
-          const allData = []
-          let latestTs = null
-          for (const { data, error } of results) {
-            if (error) throw new Error(error.message)
-            if (data) {
-              allData.push(...data)
-              for (const row of data) {
-                if (row.updated_at && (!latestTs || row.updated_at > latestTs)) latestTs = row.updated_at
-              }
-            }
-          }
-          if (!allData.length) throw new Error('No data returned')
-          retryCountRef.current = 0
-          setIncidents(allData)
-          saveCache('incidents', allData)
-          if (latestTs) {
-            setLastUpdated(latestTs)
-            saveCache('lastUpdated', latestTs)
-          }
-          return
-        } catch (fallbackErr) {
-          console.error('Supabase fallback also failed:', fallbackErr)
-        }
+        console.error('Failed to load data from R2:', err)
         if (!CACHED_INCIDENTS) {
           setError(err.message)
         }
-        setFetchAttempt(n => n + 1)
       }
     }
 
@@ -238,15 +184,11 @@ export default function App() {
       const cached = loadCache('lastUpdated')
       if (!cached) return
       try {
-        const { data } = await supabase
-          .from('clean_incidents')
-          .select('updated_at')
-          .neq('is_duplicate', true)
-          .order('updated_at', { ascending: false })
-          .limit(1)
-        if (!active) return
-        const latest = data?.[0]?.updated_at
-        if (latest && latest !== cached) {
+        const resp = await fetch(R2_BASE + '/meta.json')
+        if (!resp.ok) return
+        const meta = await resp.json()
+        if (!meta.updated_at) return
+        if (meta.updated_at !== cached) {
           console.log('Data change detected, refreshing...')
           await fetchData()
         }
@@ -270,15 +212,14 @@ export default function App() {
     const eid = selectedIncident?.event_id_cnty
     if (!eid || selectedIncident.notes !== undefined) return
     let cancelled = false
-    supabase
-      .from('clean_incidents')
-      .select('notes')
-      .eq('event_id_cnty', eid)
-      .single()
-      .then(({ data, error }) => {
-        if (cancelled || error || !data) return
-        setSelectedIncident(prev => prev?.event_id_cnty === eid ? { ...prev, notes: data.notes || '' } : prev)
+    fetch(R2_BASE + '/notes.json')
+      .then(r => r.json())
+      .then(notesMap => {
+        if (cancelled) return
+        const note = notesMap[eid] || ''
+        setSelectedIncident(prev => prev?.event_id_cnty === eid ? { ...prev, notes: note } : prev)
       })
+      .catch(() => {})
     return () => { cancelled = true }
   }, [selectedIncident?.event_id_cnty])
 
@@ -349,9 +290,6 @@ export default function App() {
           <div className="flex flex-col items-center gap-4">
             <div className="h-8 w-8 animate-spin rounded-full border-2 border-border border-t-cyan-500 dark:border-t-cyan-400" />
             <p className="text-sm text-muted-foreground">Loading Nigeria Conflict Data...</p>
-            {fetchAttempt > 0 && (
-              <p className="text-xs text-amber-500 dark:text-amber-400">Query timed out — retrying...</p>
-            )}
           </div>
         )}
       </div>
