@@ -10,7 +10,7 @@ import DataDictionary from './components/Layout/DataDictionary.jsx'
 import SeasonalityHeatmap from './components/Charts/SeasonalityHeatmap.jsx'
 import ZoneFatalityBreakdown from './components/Charts/ZoneFatalityBreakdown.jsx'
 
-const DATA_URL = import.meta.env.DEV ? '/data' : 'https://cdn.jsdelivr.net/gh/PinnacleDaaS/Insecurity-Tracker@main/tracker-app/public/data'
+const DATA_URL = '/data'
 
 function matchesFilters(d, f) {
   if (f.state !== 'All' && d.state_clean !== f.state) return false
