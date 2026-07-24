@@ -10,7 +10,7 @@ import DataDictionary from './components/Layout/DataDictionary.jsx'
 import SeasonalityHeatmap from './components/Charts/SeasonalityHeatmap.jsx'
 import ZoneFatalityBreakdown from './components/Charts/ZoneFatalityBreakdown.jsx'
 
-const R2_BASE = import.meta.env.VITE_R2_BASE || (import.meta.env.DEV ? '/data' : 'https://pub-6822fbb2a7bf4318838ad6be0300175a.r2.dev')
+const R2_BASE = import.meta.env.VITE_R2_BASE || '/data'
 
 function matchesFilters(d, f) {
   if (f.state !== 'All' && d.state_clean !== f.state) return false
