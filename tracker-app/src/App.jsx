@@ -10,7 +10,7 @@ import DataDictionary from './components/Layout/DataDictionary.jsx'
 import SeasonalityHeatmap from './components/Charts/SeasonalityHeatmap.jsx'
 import ZoneFatalityBreakdown from './components/Charts/ZoneFatalityBreakdown.jsx'
 
-const R2_BASE = import.meta.env.VITE_R2_BASE || '/data'
+const DATA_URL = import.meta.env.DEV ? '/data' : 'https://cdn.jsdelivr.net/gh/PinnacleDaaS/Insecurity-Tracker@main/tracker-app/public/data'
 
 function matchesFilters(d, f) {
   if (f.state !== 'All' && d.state_clean !== f.state) return false
@@ -142,7 +142,7 @@ export default function App() {
     async function fetchData() {
       setError(null)
       try {
-        const resp = await fetch(R2_BASE + '/incidents.json')
+        const resp = await fetch(DATA_URL + '/incidents.json')
         if (!resp.ok) throw new Error('Failed to load data (HTTP ' + resp.status + ')')
         const allData = await resp.json()
 
@@ -184,7 +184,7 @@ export default function App() {
       const cached = loadCache('lastUpdated')
       if (!cached) return
       try {
-        const resp = await fetch(R2_BASE + '/meta.json')
+        const resp = await fetch(DATA_URL + '/meta.json')
         if (!resp.ok) return
         const meta = await resp.json()
         if (!meta.updated_at) return
@@ -212,7 +212,7 @@ export default function App() {
     const eid = selectedIncident?.event_id_cnty
     if (!eid || selectedIncident.notes !== undefined) return
     let cancelled = false
-    fetch(R2_BASE + '/notes.json')
+    fetch(DATA_URL + '/notes.json')
       .then(r => r.json())
       .then(notesMap => {
         if (cancelled) return
@@ -406,3 +406,5 @@ export default function App() {
     </DashboardLayout>
   )
 }
+
+

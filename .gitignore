@@ -13,3 +13,5 @@ dashboard_prompt
 .opencode/
 .vscode
 opencode.json
+.vercel
+.env*
