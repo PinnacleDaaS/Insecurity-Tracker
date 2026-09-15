@@ -16,6 +16,8 @@ const LEGEND_ITEMS = [
 
 const NIGERIA_BOUNDS = [2.5, 3.5, 14.5, 14]
 
+const CARTO_KEY = 'cb1_3mjf_1_ddb8879b5215fc6e4e2b1705'
+
 const darkMapStyle = {
   version: 8,
   name: 'Dark',
@@ -23,8 +25,8 @@ const darkMapStyle = {
     carto: {
       type: 'raster',
       tiles: [
-        'https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-        'https://b.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+        `https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png?key=${CARTO_KEY}`,
+        `https://b.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png?key=${CARTO_KEY}`,
       ],
       tileSize: 256,
       attribution: '&copy; <a href="https://carto.com/">CARTO</a>',
@@ -43,8 +45,8 @@ const lightMapStyle = {
     carto: {
       type: 'raster',
       tiles: [
-        'https://a.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
-        'https://b.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
+        `https://a.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png?key=${CARTO_KEY}`,
+        `https://b.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png?key=${CARTO_KEY}`,
       ],
       tileSize: 256,
       attribution: '&copy; <a href="https://carto.com/">CARTO</a>',

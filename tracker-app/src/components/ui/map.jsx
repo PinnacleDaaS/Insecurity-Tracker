@@ -18,9 +18,47 @@ import { X, Minus, Plus, Locate, Maximize, Loader2 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 
+const CARTO_KEY = "cb1_3mjf_1_ddb8879b5215fc6e4e2b1705";
+
 const defaultStyles = {
-  dark: "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json",
-  light: "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json",
+  dark: {
+    version: 8,
+    name: "Dark",
+    sources: {
+      carto: {
+        type: "raster",
+        tiles: [
+          `https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png?key=${CARTO_KEY}`,
+          `https://b.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png?key=${CARTO_KEY}`,
+        ],
+        tileSize: 256,
+        attribution: '&copy; <a href="https://carto.com/">CARTO</a>',
+      },
+    },
+    layers: [
+      { id: "background", type: "background", paint: { "background-color": "#000000" } },
+      { id: "carto-tiles", type: "raster", source: "carto", paint: { "raster-opacity": 0.6 } },
+    ],
+  },
+  light: {
+    version: 8,
+    name: "Light",
+    sources: {
+      carto: {
+        type: "raster",
+        tiles: [
+          `https://a.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png?key=${CARTO_KEY}`,
+          `https://b.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png?key=${CARTO_KEY}`,
+        ],
+        tileSize: 256,
+        attribution: '&copy; <a href="https://carto.com/">CARTO</a>',
+      },
+    },
+    layers: [
+      { id: "background", type: "background", paint: { "background-color": "#f8fafc" } },
+      { id: "carto-tiles", type: "raster", source: "carto", paint: { "raster-opacity": 1 } },
+    ],
+  },
 };
 
 // Check document class for theme (works with next-themes, etc.)
