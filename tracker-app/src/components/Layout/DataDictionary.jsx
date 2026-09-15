@@ -200,12 +200,20 @@ export default function DataDictionary({ open, onClose, dateBounds }) {
                   <p className="text-xs">Political violence and protest data across all 36 Nigerian states and the Federal Capital Territory. The map displays state boundaries, state/LGA labels, and LGA boundaries at higher zoom levels for geographic context.</p>
                 </div>
                 <div>
+                  <span className="font-semibold text-foreground text-xs">Geolocation &amp; Zones</span>
+                  <p className="text-xs">Each incident is mapped to its Local Government Area and the 36 states plus the Federal Capital Territory. Spellings are normalised to canonical state names (e.g. "Nassarawa" &rarr; "Nasarawa", "Federal Capital Territory" &rarr; "FCT") and every state is assigned to one of the six geopolitical zones.</p>
+                </div>
+                <div>
                   <span className="font-semibold text-foreground text-xs">Deduplication</span>
                   <p className="text-xs">Near-identical incidents from multiple sources are detected via Jaccard similarity on same-date notes and flagged as duplicates. Flagged incidents are excluded from all counts.</p>
                 </div>
                 <div>
-                  <span className="font-semibold text-foreground text-xs">NLP Extraction</span>
-                  <p className="text-xs">Kidnap counts, fatality breakdowns (combatants, security forces, civilians), and target categories are extracted from incident notes using pattern matching and keyword classification.</p>
+                  <span className="font-semibold text-foreground text-xs">Kidnap counts</span>
+                  <p className="text-xs">An incident is counted as a kidnap event (is_kidnap) when the notes say people were kidnapped, abducted, abducted at gunpoint, or held hostage/ransom. The kidnapped_count is the number of people taken. Quantities are read from the notes with simple language rules: uncertain counts default to a conservative estimate ("several"&rarr;5, "dozens"&rarr;24, "scores"&rarr;20); a range like "20-30" uses the lower bound (20); cattle rustling or stolen property (no people) counts as 0; rescues, releases or escapes count as 0; unclear numbers count as 0.</p>
+                </div>
+                <div>
+                  <span className="font-semibold text-foreground text-xs">Fatality breakdown</span>
+                  <p className="text-xs">ACLED reports a single total for deaths per incident, so the split between civilians, security forces and combatants is derived from the incident notes. A death is counted as security forces when the notes tie it to soldiers, troops, police officers, security personnel, or members of the Civilian Joint Task Force / NSCDC; as combatants when tied to militants, bandits, terrorists, insurgents, fighters, gunmen, cultists or communal militias; and as civilian otherwise. If the notes do not state a split, deaths are counted as civilian for civilian-targeting events, protests, riots and violence-against-civilians, and as combatants for battles and explosions. Any unstated remainder follows the same rule, and totals are always scaled to match the ACLED fatality figure exactly.</p>
                 </div>
               </div>
             </div>

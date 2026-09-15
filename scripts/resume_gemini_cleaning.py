@@ -16,6 +16,22 @@ from pydantic import BaseModel, Field
 from google import genai
 from google.genai import types
 
+sys.path.insert(0, str(Path(__file__).parent))
+from fatality_classifier import split_fatalities
+
+STATE_TO_ZONE = {
+    'Adamawa': 'North East', 'Bauchi': 'North East', 'Borno': 'North East', 'Gombe': 'North East', 'Taraba': 'North East', 'Yobe': 'North East',
+    'Jigawa': 'North West', 'Kaduna': 'North West', 'Kano': 'North West', 'Katsina': 'North West', 'Kebbi': 'North West', 'Sokoto': 'North West', 'Zamfara': 'North West',
+    'Benue': 'North Central', 'Kogi': 'North Central', 'Kwara': 'North Central', 'Nasarawa': 'North Central', 'Niger': 'North Central', 'Plateau': 'North Central', 'FCT': 'North Central',
+    'Abia': 'South East', 'Anambra': 'South East', 'Ebonyi': 'South East', 'Enugu': 'South East', 'Imo': 'South East',
+    'Akwa Ibom': 'South South', 'Bayelsa': 'South South', 'Cross River': 'South South', 'Delta': 'South South', 'Edo': 'South South', 'Rivers': 'South South',
+    'Ekiti': 'South West', 'Lagos': 'South West', 'Ogun': 'South West', 'Ondo': 'South West', 'Osun': 'South West', 'Oyo': 'South West'
+}
+STATE_ALIASES = {
+    'Nassarawa': 'Nasarawa',
+    'Federal Capital Territory': 'FCT',
+}
+
 
 class RowCleanResult(BaseModel):
     id: str = Field(description="The event_id_cnty of the record.")
@@ -93,20 +109,46 @@ def export_dashboard_json(rows: list[dict]):
     cols = ['event_id_cnty', 'event_date', 'year', 'event_type', 'sub_event_type',
             'state_clean', 'lga_clean', 'geopolitical_zone', 'actor1', 'actor2',
             'location', 'latitude', 'longitude', 'fatalities', 'kidnapped_count',
-            'civilian_targeting', 'presidential_admin', 'updated_at']
+            'civilian_targeting', 'fatalities_civilians', 'fatalities_security_forces',
+            'fatalities_combatants', 'presidential_admin', 'updated_at']
     filtered = [r for r in rows if r.get('is_duplicate') != 'True' and r.get('is_duplicate') is not True]
     exported = []
     for r in filtered:
+        state = STATE_ALIASES.get(r.get('state_clean', ''), r.get('state_clean', ''))
+        zone = STATE_TO_ZONE.get(state, r.get('geopolitical_zone', ''))
+        civilian_targeting = str(r.get('civilian_targeting', '')).strip().lower() == 'true'
+        try:
+            fatalities = int(r.get('fatalities', 0) or 0)
+        except (ValueError, TypeError):
+            fatalities = 0
+        notes_text = (r.get('notes') or '')
+        civ, sec, comb = split_fatalities(fatalities, r.get('event_type', ''),
+                                           civilian_targeting, notes_text)
         row = {}
         for c in cols:
             v = r.get(c)
             if c == 'civilian_targeting':
-                row[c] = True if str(v).strip().lower() == 'true' else False
-            elif c in ('year', 'fatalities', 'latitude', 'longitude', 'kidnapped_count'):
+                row[c] = civilian_targeting
+            elif c == 'state_clean':
+                row[c] = state
+            elif c == 'geopolitical_zone':
+                row[c] = zone
+            elif c in ('year', 'fatalities', 'kidnapped_count'):
                 try:
-                    row[c] = float(v) if c in ('latitude', 'longitude') else int(v)
+                    row[c] = int(v)
                 except (ValueError, TypeError):
-                    row[c] = 0 if c in ('fatalities', 'kidnapped_count', 'year') else 0.0
+                    row[c] = 0
+            elif c in ('latitude', 'longitude'):
+                try:
+                    row[c] = float(v)
+                except (ValueError, TypeError):
+                    row[c] = 0.0
+            elif c == 'fatalities_civilians':
+                row[c] = civ
+            elif c == 'fatalities_security_forces':
+                row[c] = sec
+            elif c == 'fatalities_combatants':
+                row[c] = comb
             else:
                 row[c] = v
         exported.append(row)

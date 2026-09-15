@@ -22,15 +22,24 @@ import openpyxl
 import boto3
 from botocore.config import Config
 
+sys.path.insert(0, str(Path(__file__).parent / "scripts"))
+from fatality_classifier import split_fatalities
+
 
 # ─── Config & Constants ────────────────────────────────────────────
 STATE_TO_ZONE = {
     'Adamawa': 'North East', 'Bauchi': 'North East', 'Borno': 'North East', 'Gombe': 'North East', 'Taraba': 'North East', 'Yobe': 'North East',
     'Jigawa': 'North West', 'Kaduna': 'North West', 'Kano': 'North West', 'Katsina': 'North West', 'Kebbi': 'North West', 'Sokoto': 'North West', 'Zamfara': 'North West',
-    'Benue': 'North Central', 'Kogi': 'North Central', 'Kwara': 'North Central', 'Nasarawa': 'North Central', 'Niger': 'North Central', 'Plateau': 'North Central', 'Federal Capital Territory': 'North Central',
+    'Benue': 'North Central', 'Kogi': 'North Central', 'Kwara': 'North Central', 'Nasarawa': 'North Central', 'Nassarawa': 'North Central', 'Niger': 'North Central', 'Plateau': 'North Central', 'Federal Capital Territory': 'North Central', 'FCT': 'North Central',
     'Abia': 'South East', 'Anambra': 'South East', 'Ebonyi': 'South East', 'Enugu': 'South East', 'Imo': 'South East',
     'Akwa Ibom': 'South South', 'Bayelsa': 'South South', 'Cross River': 'South South', 'Delta': 'South South', 'Edo': 'South South', 'Rivers': 'South South',
     'Ekiti': 'South West', 'Lagos': 'South West', 'Ogun': 'South West', 'Ondo': 'South West', 'Osun': 'South West', 'Oyo': 'South West'
+}
+
+# Canonical state names used by the dashboard sidebar filters.
+STATE_ALIASES = {
+    'Nassarawa': 'Nasarawa',
+    'Federal Capital Territory': 'FCT',
 }
 
 # Supported categories for target_category column
@@ -112,7 +121,8 @@ def export_dashboard_json(rows: list[dict]):
     cols = ['event_id_cnty', 'event_date', 'year', 'event_type', 'sub_event_type',
             'state_clean', 'lga_clean', 'geopolitical_zone', 'actor1', 'actor2',
             'location', 'latitude', 'longitude', 'fatalities', 'kidnapped_count',
-            'civilian_targeting', 'presidential_admin', 'updated_at']
+            'civilian_targeting', 'fatalities_civilians', 'fatalities_security_forces',
+            'fatalities_combatants', 'presidential_admin', 'updated_at']
     filtered = [r for r in rows if not r.get('is_duplicate')]
     exported = [{c: r[c] for c in cols} for r in filtered]
     exported.sort(key=lambda r: r['event_date'], reverse=True)
@@ -343,9 +353,9 @@ def main():
             event_date = row.get("event_date", "")
             year_val = int(event_date[:4]) if event_date else datetime.now().year
             
-            # Map state
+            # Map state (apply canonical name aliases)
             admin1 = row.get("admin1", "").strip()
-            state_clean = admin1
+            state_clean = STATE_ALIASES.get(admin1, admin1)
             
             # Geopolitical Zone
             geo_zone = STATE_TO_ZONE.get(state_clean, "General/Unspecified")
@@ -403,7 +413,8 @@ def main():
             
             # Calculations
             pres_admin = get_presidential_admin(event_date)
-            fat_civilians = float(fatalities) if civilian_targeting else 0.0
+            fat_civilians, fat_security, fat_combatants = split_fatalities(
+                fatalities, event_type, civilian_targeting, notes)
             
             structured_rows.append({
                 "event_id_cnty": event_id,
@@ -425,8 +436,8 @@ def main():
                 "fatalities": fatalities,
                 "notes": notes,
                 "civilian_targeting": civilian_targeting,
-                "fatalities_combatants": 0,
-                "fatalities_security_forces": 0,
+                "fatalities_combatants": fat_combatants,
+                "fatalities_security_forces": fat_security,
                 "fatalities_civilians": fat_civilians,
                 "presidential_admin": pres_admin,
                 "is_reference": False,
